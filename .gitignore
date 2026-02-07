@@ -1,0 +1,5 @@
+.DS_Store
+**/.DS_Store
+
+# Local reference library (contains very large binaries; keep out of git by default)
+__Reference__/
