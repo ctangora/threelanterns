@@ -32,6 +32,26 @@
   <label>Detected language
     <input type="text" name="detected_language" value="{{ detected_language or '' }}" placeholder="eng, Old English, lat..." />
   </label>
+  <label>Min usability score
+    <input type="number" min="0" max="1" step="0.01" name="min_usability" value="{{ min_usability if min_usability is not none else '' }}" />
+  </label>
+  <label>Min relevance score
+    <input type="number" min="0" max="1" step="0.01" name="min_relevance" value="{{ min_relevance if min_relevance is not none else '' }}" />
+  </label>
+  <label>Relevance state
+    <select name="relevance_state">
+      <option value="" {% if relevance_state is none or relevance_state == "" %}selected{% endif %}>(any)</option>
+      <option value="accepted" {% if relevance_state == "accepted" %}selected{% endif %}>accepted</option>
+      <option value="borderline" {% if relevance_state == "borderline" %}selected{% endif %}>borderline</option>
+      <option value="filtered" {% if relevance_state == "filtered" %}selected{% endif %}>filtered</option>
+    </select>
+  </label>
+  <label>Include filtered passages
+    <select name="include_filtered">
+      <option value="false" {% if include_filtered is not sameas true %}selected{% endif %}>false</option>
+      <option value="true" {% if include_filtered is sameas true %}selected{% endif %}>true</option>
+    </select>
+  </label>
   {% endif %}
   <label>Min confidence
     <input type="number" min="0" max="1" step="0.01" name="min_confidence" value="{{ min_confidence if min_confidence is not none else '' }}" />
@@ -85,14 +105,24 @@
     | ratio={{ item.untranslated_ratio }}
     | language={{ item.detected_language_label or item.detected_language_code or "und" }}
     | needs_reprocess={{ item.needs_reprocess }}
+    | usability={{ item.usability_score }}
+    | relevance={{ item.relevance_score }}
+    | relevance_state={{ item.relevance_state }}
   </p>
   {% endif %}
   <label><input type="checkbox" form="bulk-review-form" name="object_ids" value="{{ item.object_id }}" /> Select for bulk</label>
   <pre>{{ item.payload_pretty }}</pre>
   {% if kind == "passage" %}
   <form method="post" action="/review/passages/{{ item.object_id }}/reprocess">
-    <label>Reprocess reason
-      <input name="reason" type="text" value="Manual review requested reprocess" />
+    <label>Reprocess reason code
+      <select name="reason_code">
+        {% for reason_code, reason_label in reprocess_reason_options %}
+        <option value="{{ reason_code }}">{{ reason_label }} ({{ reason_code }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Reprocess reason note
+      <input name="reason_note" type="text" placeholder="Optional context for this reprocess request" />
     </label>
     <button type="submit">Queue Reprocess</button>
   </form>

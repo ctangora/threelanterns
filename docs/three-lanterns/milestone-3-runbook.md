@@ -89,8 +89,15 @@ python3 scripts/run_r3a_cycle.py
 3. Reprocess queue visibility:
    - API: `GET /api/v1/reprocess/jobs`
    - Web: `/review/reprocess-jobs`
-4. Auto policy:
+4. Reprocess reason analytics:
+   - API: `GET /api/v1/reprocess/reasons/summary`
+5. Quality score filtering:
+   - Passage review queue supports `min_usability`, `min_relevance`, `relevance_state`, `include_filtered`
+6. Existing corpus quality backfill:
+   - `python3 scripts/backfill_passage_quality.py`
+7. Auto policy:
    - `untranslated_ratio > 0.20` auto-queues reprocess
+   - `usability_score < 0.60` auto-queues reprocess
    - max attempts: 2, then passage is marked `unresolved`
    - unresolved passages emit `uncertain_translation` flag
 

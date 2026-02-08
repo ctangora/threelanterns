@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.constants import PASSAGE_REPROCESS_MAX_ATTEMPTS, TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD
+from app.constants import PASSAGE_REPROCESS_MAX_ATTEMPTS, PASSAGE_USABILITY_REPROCESS_THRESHOLD, TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD
 from app.enums import JobStatus, ReprocessTriggerMode, ReviewerState, SourceObjectType, TranslationStatus
 from app.models.core import (
     FlagRecord,
@@ -21,9 +21,10 @@ from app.models.core import (
 from app.services.audit import emit_audit_event
 from app.services.connectors.free_refs import search_free_references
 from app.services.parsers.pdf import parse_pdf
+from app.services.quality import evaluate_passage_quality
 from app.services.translation import translate_passage_excerpt
 from app.services.utils import now_utc
-from app.services.validation import ValidationError, require
+from app.services.validation import ValidationError, require, validate_reprocess_reason_code
 
 
 def _to_json_safe(value: Any) -> Any:
@@ -137,10 +138,14 @@ def enqueue_reprocess_job(
     passage_id: str,
     actor: str,
     trigger_mode: ReprocessTriggerMode,
-    reason: str,
+    reason: str | None = None,
+    reason_code: str = "manual_operator_request",
+    reason_note: str | None = None,
     correlation_id: str,
 ) -> PassageReprocessJob:
-    compact_reason = reason.strip()
+    validate_reprocess_reason_code(reason_code)
+    compact_note = (reason_note or reason or "").strip()
+    compact_reason = compact_note or reason_code
     require(bool(compact_reason), "Reprocess reason is required")
     passage = db.get(PassageEvidence, passage_id)
     require(passage is not None, f"Passage not found: {passage_id}")
@@ -165,6 +170,8 @@ def enqueue_reprocess_job(
         status=JobStatus.pending,
         trigger_mode=trigger_mode,
         trigger_reason=compact_reason,
+        trigger_reason_code=reason_code,
+        trigger_reason_note=compact_note if compact_note else None,
         attempt_count=0,
         max_attempts=PASSAGE_REPROCESS_MAX_ATTEMPTS,
         used_pdf_crossref=False,
@@ -192,6 +199,7 @@ def enqueue_reprocess_job(
             "reprocess_job_id": job.reprocess_job_id,
             "trigger_mode": trigger_mode.value,
             "reason": compact_reason,
+            "reason_code": reason_code,
         },
     )
     return job
@@ -297,7 +305,9 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
 
         accepted_translation = None
         accepted_variant: str | None = None
+        accepted_quality = None
         last_translation = None
+        last_quality = None
         last_variant: str | None = None
 
         for variant_index, variant in enumerate(variants, start=1):
@@ -311,8 +321,16 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
                 source_variant=source_variant,
                 reference_context=variant.get("reference_context"),
             )
+            quality = evaluate_passage_quality(result.modern_english_text)
 
-            quality_decision = "accepted" if result.untranslated_ratio <= TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD else "needs_reprocess"
+            quality_decision = (
+                "accepted"
+                if (
+                    result.untranslated_ratio <= TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD
+                    and quality.usability_score >= PASSAGE_USABILITY_REPROCESS_THRESHOLD
+                )
+                else "needs_reprocess"
+            )
             revision = PassageTranslationRevision(
                 passage_id=passage.passage_id,
                 attempt_no=job.attempt_count,
@@ -323,7 +341,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
                 detected_language_label=result.detected_language_label,
                 untranslated_ratio=result.untranslated_ratio,
                 quality_decision=quality_decision,
-                provenance_json=variant["provenance"],
+                provenance_json={**variant["provenance"], "quality": quality.notes},
                 translation_trace_id=result.trace_id,
                 created_by=actor,
                 updated_by=actor,
@@ -331,6 +349,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
             db.add(revision)
 
             last_translation = result
+            last_quality = quality
             last_variant = source_variant
             if source_variant == "pdf_crossref":
                 job.used_pdf_crossref = True
@@ -340,6 +359,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
             if quality_decision == "accepted":
                 accepted_translation = result
                 accepted_variant = source_variant
+                accepted_quality = quality
                 break
 
         now = now_utc()
@@ -357,6 +377,12 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
             passage.needs_reprocess = False
             passage.translation_provider = accepted_translation.translation_provider
             passage.translation_trace_id = accepted_translation.trace_id
+            if accepted_quality is not None:
+                passage.usability_score = accepted_quality.usability_score
+                passage.relevance_score = accepted_quality.relevance_score
+                passage.relevance_state = accepted_quality.relevance_state
+                passage.quality_notes_json = accepted_quality.notes
+                passage.quality_version = accepted_quality.quality_version
 
             previous = job.status.value
             job.status = JobStatus.completed
@@ -377,6 +403,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
                     "reprocess_job_id": job.reprocess_job_id,
                     "accepted_variant": accepted_variant,
                     "untranslated_ratio": accepted_translation.untranslated_ratio,
+                    "usability_score": accepted_quality.usability_score if accepted_quality else None,
                 },
             )
             return
@@ -388,10 +415,17 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
             passage.untranslated_ratio = last_translation.untranslated_ratio
             passage.translation_provider = last_translation.translation_provider
             passage.translation_trace_id = last_translation.trace_id
+        if last_quality is not None:
+            passage.usability_score = last_quality.usability_score
+            passage.relevance_score = last_quality.relevance_score
+            passage.relevance_state = last_quality.relevance_state
+            passage.quality_notes_json = last_quality.notes
+            passage.quality_version = last_quality.quality_version
 
         unresolved_rationale = (
-            "Passage remained above untranslated ratio threshold after reprocessing. "
-            f"latest_ratio={passage.untranslated_ratio} threshold={TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD}"
+            "Passage failed translation/usability quality gates after reprocessing. "
+            f"latest_ratio={passage.untranslated_ratio} threshold={TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD} "
+            f"latest_usability={passage.usability_score} usability_threshold={PASSAGE_USABILITY_REPROCESS_THRESHOLD}"
         )
         if job.attempt_count >= job.max_attempts:
             passage.translation_status = TranslationStatus.unresolved
@@ -406,6 +440,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
                 "max_attempts": job.max_attempts,
                 "last_variant": last_variant,
                 "untranslated_ratio": passage.untranslated_ratio,
+                "usability_score": passage.usability_score,
             }
             emit_audit_event(
                 db,
@@ -430,6 +465,7 @@ def process_reprocess_job(db: Session, *, job: PassageReprocessJob, actor: str, 
                 "max_attempts": job.max_attempts,
                 "last_variant": last_variant,
                 "untranslated_ratio": passage.untranslated_ratio,
+                "usability_score": passage.usability_score,
             }
             emit_audit_event(
                 db,
@@ -482,6 +518,7 @@ def list_reprocess_jobs(
     *,
     status: str | None = None,
     trigger_mode: str | None = None,
+    reason_code: str | None = None,
     passage_id: str | None = None,
     page: int = 1,
     page_size: int = 50,
@@ -504,6 +541,9 @@ def list_reprocess_jobs(
         except ValueError as exc:
             raise ValidationError(f"Unsupported trigger_mode: {trigger_mode}") from exc
         where_clauses.append(PassageReprocessJob.trigger_mode == parsed_trigger)
+    if reason_code:
+        validate_reprocess_reason_code(reason_code)
+        where_clauses.append(PassageReprocessJob.trigger_reason_code == reason_code)
     if passage_id:
         where_clauses.append(PassageReprocessJob.passage_id == passage_id)
 
@@ -525,6 +565,29 @@ def list_reprocess_jobs(
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
+def reprocess_reason_summary(db: Session) -> list[dict[str, Any]]:
+    stmt = (
+        select(
+            PassageReprocessJob.trigger_reason_code,
+            PassageReprocessJob.status,
+            func.count().label("count"),
+        )
+        .group_by(PassageReprocessJob.trigger_reason_code, PassageReprocessJob.status)
+        .order_by(PassageReprocessJob.trigger_reason_code.asc())
+    )
+    rows = db.execute(stmt).all()
+    summary: list[dict[str, Any]] = []
+    for reason_code, status, count in rows:
+        summary.append(
+            {
+                "reason_code": reason_code,
+                "status": status.value if hasattr(status, "value") else str(status),
+                "count": int(count),
+            }
+        )
+    return summary
+
+
 def get_passage_quality(db: Session, *, passage_id: str) -> dict[str, Any]:
     passage = db.get(PassageEvidence, passage_id)
     require(passage is not None, f"Passage not found: {passage_id}")
@@ -540,6 +603,11 @@ def get_passage_quality(db: Session, *, passage_id: str) -> dict[str, Any]:
         "last_reprocess_at": passage.last_reprocess_at,
         "translation_provider": passage.translation_provider,
         "translation_trace_id": passage.translation_trace_id,
+        "usability_score": passage.usability_score,
+        "relevance_score": passage.relevance_score,
+        "relevance_state": passage.relevance_state.value if hasattr(passage.relevance_state, "value") else str(passage.relevance_state),
+        "quality_notes_json": passage.quality_notes_json,
+        "quality_version": passage.quality_version,
         "unresolved": passage.translation_status == TranslationStatus.unresolved,
     }
 

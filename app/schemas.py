@@ -127,7 +127,9 @@ class BulkReviewResponse(BaseModel):
 
 
 class PassageReprocessRequest(BaseModel):
-    reason: str = Field(min_length=1)
+    reason_code: str = "manual_operator_request"
+    reason_note: str | None = None
+    reason: str | None = None
     mode: Literal["manual", "auto"] = "manual"
 
 
@@ -152,6 +154,11 @@ class PassageQualityResponse(BaseModel):
     last_reprocess_at: datetime | None = None
     translation_provider: str | None = None
     translation_trace_id: str | None = None
+    usability_score: float
+    relevance_score: float
+    relevance_state: str
+    quality_notes_json: dict[str, Any]
+    quality_version: str
     unresolved: bool
 
 
@@ -160,6 +167,16 @@ class ReprocessJobQueueResponse(BaseModel):
     page: int
     page_size: int
     items: list[dict[str, Any]]
+
+
+class ReprocessReasonSummaryItem(BaseModel):
+    reason_code: str
+    status: str
+    count: int
+
+
+class ReprocessReasonSummaryResponse(BaseModel):
+    items: list[ReprocessReasonSummaryItem]
 
 
 class ReviewMetricsResponse(BaseModel):

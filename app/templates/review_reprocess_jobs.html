@@ -6,6 +6,16 @@
 {% endif %}
 <p>Total jobs: {{ total }}</p>
 <p>Showing page {{ page }} (page size {{ page_size }}) with {{ items|length }} item(s).</p>
+<form method="get" action="/review/reprocess-jobs">
+  <input type="hidden" name="page" value="{{ page }}" />
+  <input type="hidden" name="page_size" value="{{ page_size }}" />
+  <input type="hidden" name="status" value="{{ status }}" />
+  <input type="hidden" name="trigger_mode" value="{{ trigger_mode }}" />
+  <input type="hidden" name="reason_code" value="{{ reason_code }}" />
+  <input type="hidden" name="passage_id" value="{{ passage_id }}" />
+  <input type="hidden" name="auto_refresh" value="{{ auto_refresh if auto_refresh_enabled else 'off' }}" />
+  <button type="submit">Refresh Now</button>
+</form>
 <form method="get" action="/review/reprocess-jobs" class="card">
   <label>Status
     <select name="status">
@@ -24,8 +34,24 @@
       <option value="auto_threshold" {% if trigger_mode == "auto_threshold" %}selected{% endif %}>auto_threshold</option>
     </select>
   </label>
+  <label>Reason code
+    <select name="reason_code">
+      <option value="" {% if reason_code == "" %}selected{% endif %}>(any)</option>
+      {% for code, label in reprocess_reason_options %}
+      <option value="{{ code }}" {% if reason_code == code %}selected{% endif %}>{{ label }} ({{ code }})</option>
+      {% endfor %}
+    </select>
+  </label>
   <label>Passage ID
     <input type="text" name="passage_id" value="{{ passage_id }}" />
+  </label>
+  <label>Auto refresh
+    <select name="auto_refresh">
+      <option value="off" {% if not auto_refresh_enabled %}selected{% endif %}>off</option>
+      <option value="10" {% if auto_refresh == 10 %}selected{% endif %}>10s</option>
+      <option value="30" {% if auto_refresh == 30 %}selected{% endif %}>30s</option>
+      <option value="60" {% if auto_refresh == 60 %}selected{% endif %}>60s</option>
+    </select>
   </label>
   <label>Page size
     <input type="number" min="1" max="200" name="page_size" value="{{ page_size }}" />
@@ -46,10 +72,18 @@
   <h3><a href="/records/{{ item.reprocess_job_id }}">{{ item.reprocess_job_id }}</a></h3>
   <p>Passage: <a href="/records/{{ item.passage_id }}">{{ item.passage_id }}</a></p>
   <p>Status: {{ item.status }} | Trigger: {{ item.trigger_mode }} | Attempts: {{ item.attempt_count }}/{{ item.max_attempts }}</p>
+  <p>Reason code: {{ item.trigger_reason_code }} | Reason note: {{ item.trigger_reason_note or item.trigger_reason }}</p>
   <p>Used PDF cross-ref: {{ item.used_pdf_crossref }} | Used external reference: {{ item.used_external_reference }}</p>
   {% if item.last_error %}
   <pre>{{ item.last_error }}</pre>
   {% endif %}
 </section>
 {% endfor %}
+{% if auto_refresh_enabled %}
+<script>
+  window.setTimeout(() => {
+    window.location.reload();
+  }, {{ auto_refresh * 1000 }});
+</script>
+{% endif %}
 {% endblock %}

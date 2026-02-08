@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.enums import JobStatus, ReprocessTriggerMode
+from app.constants import PASSAGE_USABILITY_REPROCESS_THRESHOLD
+from app.enums import JobStatus, RelevanceState, ReprocessTriggerMode
 from app.models.core import IngestionJob, JobAttempt, PassageReprocessJob, SourceMaterialRecord
 from app.services.ai.proposals import propose_for_passage
 from app.services.artifacts import artifact_exists, store_text_artifact
@@ -150,20 +151,40 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
 
         created = {"tags": 0, "links": 0, "flags": 0}
         auto_reprocess_queued = 0
+        skipped_filtered_passages = 0
         for passage in passages:
+            auto_reason_code: str | None = None
+            auto_reason_note: str | None = None
             if passage.needs_reprocess:
+                auto_reason_code = "translation_incomplete"
+                auto_reason_note = (
+                    "Auto reprocess queued after translation quality gate: "
+                    f"untranslated_ratio={passage.untranslated_ratio}"
+                )
+            elif passage.usability_score < PASSAGE_USABILITY_REPROCESS_THRESHOLD:
+                auto_reason_code = "low_usability_score"
+                auto_reason_note = (
+                    "Auto reprocess queued after usability quality gate: "
+                    f"usability_score={passage.usability_score}"
+                )
+
+            if auto_reason_code and passage.relevance_state != RelevanceState.filtered:
                 enqueue_reprocess_job(
                     db,
                     passage_id=passage.passage_id,
                     actor=actor,
                     trigger_mode=ReprocessTriggerMode.auto_threshold,
-                    reason=(
-                        "Auto reprocess queued after translation quality gate: "
-                        f"untranslated_ratio={passage.untranslated_ratio}"
-                    ),
+                    reason=auto_reason_note or auto_reason_code,
+                    reason_code=auto_reason_code,
+                    reason_note=auto_reason_note,
                     correlation_id=f"{correlation_id}:{passage.passage_id}:auto",
                 )
                 auto_reprocess_queued += 1
+
+            if passage.relevance_state == RelevanceState.filtered:
+                skipped_filtered_passages += 1
+                continue
+
             result = propose_for_passage(
                 db,
                 passage=passage,
@@ -197,6 +218,7 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
                 "links_created": created["links"],
                 "flags_created": created["flags"],
                 "auto_reprocess_queued": auto_reprocess_queued,
+                "skipped_filtered_passages": skipped_filtered_passages,
             },
         )
     except Exception as exc:

@@ -122,7 +122,14 @@ def test_runtime_schema_upgrade_adds_missing_r3_columns(tmp_path):
         "last_reprocess_at",
         "translation_provider",
         "translation_trace_id",
+        "usability_score",
+        "relevance_score",
+        "relevance_state",
+        "quality_notes_json",
+        "quality_version",
     }.issubset(passage_columns)
 
     tables = set(inspector.get_table_names())
     assert {"passage_reprocess_jobs", "passage_translation_revisions"}.issubset(tables)
+    reprocess_columns = {column["name"] for column in inspector.get_columns("passage_reprocess_jobs")}
+    assert {"trigger_reason_code", "trigger_reason_note"}.issubset(reprocess_columns)

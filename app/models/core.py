@@ -19,6 +19,7 @@ from app.enums import (
     DateConfidence,
     JobStatus,
     PublishState,
+    RelevanceState,
     ReprocessTriggerMode,
     RecordStatus,
     RelationType,
@@ -94,6 +95,9 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
         Index("ix_passage_extraction_confidence", "extraction_confidence"),
         Index("ix_passage_untranslated_ratio", "untranslated_ratio"),
         Index("ix_passage_needs_reprocess", "needs_reprocess"),
+        Index("ix_passage_usability_score", "usability_score"),
+        Index("ix_passage_relevance_score", "relevance_score"),
+        Index("ix_passage_relevance_state", "relevance_state"),
         Index("ix_passage_created_at", "created_at"),
     )
 
@@ -120,6 +124,13 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
     last_reprocess_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     translation_provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
     translation_trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    usability_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_state: Mapped[RelevanceState] = mapped_column(
+        Enum(RelevanceState), default=RelevanceState.accepted, nullable=False
+    )
+    quality_notes_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    quality_version: Mapped[str] = mapped_column(String(40), default="r32_v1", nullable=False)
 
     text: Mapped["TextRecord"] = relationship(back_populates="passages")
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="passages")
@@ -228,6 +239,7 @@ class PassageReprocessJob(Base, TimestampedMixin, OperatorMixin):
         UniqueConstraint("idempotency_key", name="uq_passage_reprocess_jobs_idempotency_key"),
         Index("ix_passage_reprocess_status", "status"),
         Index("ix_passage_reprocess_pdg", "passage_id"),
+        Index("ix_reprocess_reason_code", "trigger_reason_code"),
         Index("ix_passage_reprocess_created_at", "created_at"),
     )
 
@@ -237,6 +249,8 @@ class PassageReprocessJob(Base, TimestampedMixin, OperatorMixin):
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.pending, nullable=False)
     trigger_mode: Mapped[ReprocessTriggerMode] = mapped_column(Enum(ReprocessTriggerMode), nullable=False)
     trigger_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_reason_code: Mapped[str] = mapped_column(String(80), nullable=False, default="manual_operator_request")
+    trigger_reason_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     used_pdf_crossref: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

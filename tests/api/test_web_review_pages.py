@@ -47,3 +47,14 @@ def test_review_pages_support_pagination(client, db_session, tmp_path):
     text = response.text
     assert "Showing page 2" in text
     assert "page size 5" in text
+
+
+def test_reprocess_jobs_page_has_refresh_and_reason_filters(client, db_session, tmp_path):
+    _seed_review_data(client, db_session, tmp_path)
+
+    response = client.get("/review/reprocess-jobs?auto_refresh=10")
+    assert response.status_code == 200
+    text = response.text
+    assert "Refresh Now" in text
+    assert "Auto refresh" in text
+    assert "Reason code" in text

@@ -44,6 +44,21 @@ Milestone 3 includes:
 - [ ] Reprocess provenance is captured in `passage_translation_revisions`.
 - [ ] Passage CSV export includes translation quality columns.
 
+## R3.2 Quality Gating and Reprocess UX Checklist
+- [ ] Reprocess Jobs page supports manual refresh and auto-refresh (`off|10s|30s|60s`).
+- [ ] Reprocess queue supports `reason_code` filtering in API and UI.
+- [ ] Manual reprocess action uses standardized reason codes + optional notes.
+- [ ] Every passage has `usability_score`, `relevance_score`, and `relevance_state`.
+- [ ] Passage relevance policy active:
+  - `accepted >= 0.50`
+  - `borderline 0.30-0.49`
+  - `filtered < 0.30`
+- [ ] Filtered passages are hidden by default in passage review queue and skipped for AI proposals.
+- [ ] Auto-reprocess triggers on either:
+  - `untranslated_ratio > 0.20`
+  - `usability_score < 0.60`
+- [ ] Reprocess reason summary endpoint returns grouped counts by reason/status.
+
 ## Automated Test Expectations
 - [ ] Unit tests cover parser and proposal validation additions.
 - [ ] API tests cover:

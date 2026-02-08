@@ -26,6 +26,8 @@ def reprocess_passage(
             actor=settings.operator_id,
             trigger_mode=trigger_mode,
             reason=request.reason,
+            reason_code=request.reason_code,
+            reason_note=request.reason_note,
             correlation_id=f"api-reprocess:{passage_id}:{trigger_mode.value}",
         )
     except ValidationError as exc:

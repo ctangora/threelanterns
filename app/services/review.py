@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.enums import PublishState, ReviewDecisionEnum, ReviewerState, ReviewableObjectType
+from app.enums import PublishState, RelevanceState, ReviewDecisionEnum, ReviewerState, ReviewableObjectType
 from app.models.core import CommonalityLink, FlagRecord, PassageEvidence, ReviewDecision, RitualPatternTag
 from app.services.audit import emit_audit_event
 from app.services.validation import ValidationError, validate_review_input
@@ -64,6 +64,10 @@ def review_queue(
     needs_reprocess: bool | None = None,
     max_untranslated_ratio: float | None = None,
     detected_language: str | None = None,
+    min_usability: float | None = None,
+    min_relevance: float | None = None,
+    relevance_state: str | None = None,
+    include_filtered: bool = False,
     sort_by: str = "created_at",
     sort_dir: str = "asc",
 ) -> dict[str, Any]:
@@ -92,8 +96,24 @@ def review_queue(
         raise ValidationError(f"max_untranslated_ratio is not supported for object_type={object_type}")
     if detected_language and model is not PassageEvidence:
         raise ValidationError(f"detected_language filter is not supported for object_type={object_type}")
+    if min_usability is not None and model is not PassageEvidence:
+        raise ValidationError(f"min_usability is not supported for object_type={object_type}")
+    if min_relevance is not None and model is not PassageEvidence:
+        raise ValidationError(f"min_relevance is not supported for object_type={object_type}")
+    if relevance_state is not None and model is not PassageEvidence:
+        raise ValidationError(f"relevance_state is not supported for object_type={object_type}")
     if max_untranslated_ratio is not None and not (0.0 <= max_untranslated_ratio <= 1.0):
         raise ValidationError("max_untranslated_ratio must be within [0.0, 1.0]")
+    if min_usability is not None and not (0.0 <= min_usability <= 1.0):
+        raise ValidationError("min_usability must be within [0.0, 1.0]")
+    if min_relevance is not None and not (0.0 <= min_relevance <= 1.0):
+        raise ValidationError("min_relevance must be within [0.0, 1.0]")
+    parsed_relevance_state = None
+    if relevance_state is not None:
+        try:
+            parsed_relevance_state = RelevanceState(relevance_state)
+        except ValueError as exc:
+            raise ValidationError(f"Unsupported relevance_state: {relevance_state}") from exc
 
     if sort_by not in {"created_at", "confidence"}:
         raise ValidationError(f"Unsupported sort_by: {sort_by}")
@@ -119,6 +139,14 @@ def review_queue(
                 model.detected_language_label == compact,
             )
         )
+    if min_usability is not None and model is PassageEvidence:
+        where_clauses.append(model.usability_score >= min_usability)
+    if min_relevance is not None and model is PassageEvidence:
+        where_clauses.append(model.relevance_score >= min_relevance)
+    if parsed_relevance_state is not None and model is PassageEvidence:
+        where_clauses.append(model.relevance_state == parsed_relevance_state)
+    if not include_filtered and model is PassageEvidence:
+        where_clauses.append(model.relevance_state != RelevanceState.filtered)
 
     total_stmt = select(func.count()).select_from(model).where(*where_clauses)
     total = db.scalar(total_stmt) or 0
@@ -155,6 +183,10 @@ def review_queue(
         "needs_reprocess": needs_reprocess,
         "max_untranslated_ratio": max_untranslated_ratio,
         "detected_language": detected_language,
+        "min_usability": min_usability,
+        "min_relevance": min_relevance,
+        "relevance_state": parsed_relevance_state.value if parsed_relevance_state else None,
+        "include_filtered": include_filtered,
         "sort_by": sort_by,
         "sort_dir": sort_dir,
     }

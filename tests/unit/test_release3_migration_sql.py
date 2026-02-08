@@ -42,3 +42,24 @@ def test_r31_migration_contains_translation_quality_schema():
     ]
     for token in required_tokens:
         assert token in sql
+
+
+def test_r32_migration_contains_quality_and_reason_columns():
+    path = Path(__file__).resolve().parents[2] / "migrations" / "004_r32_passage_quality_and_reprocess_reasons.sql"
+    sql = path.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "usability_score",
+        "relevance_score",
+        "relevance_state",
+        "quality_notes_json",
+        "quality_version",
+        "trigger_reason_code",
+        "trigger_reason_note",
+        "ix_passage_usability_score",
+        "ix_passage_relevance_score",
+        "ix_passage_relevance_state",
+        "ix_reprocess_reason_code",
+    ]
+    for token in required_tokens:
+        assert token in sql

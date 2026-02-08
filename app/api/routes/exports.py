@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.enums import PublishState, ReviewerState
-from app.models.core import CommonalityLink, FlagRecord, PassageEvidence, RitualPatternTag
+from app.models.core import CommonalityLink, FlagRecord, PassageEvidence, PassageReprocessJob, RitualPatternTag
 
 router = APIRouter(prefix="/api/v1/exports", tags=["exports"])
 
@@ -39,6 +39,12 @@ def export_passages(
     rows = db.scalars(select(PassageEvidence).where(PassageEvidence.publish_state == PublishState(state))).all()
     payload: list[dict[str, str]] = []
     for row in rows:
+        latest_reason_code = db.scalar(
+            select(PassageReprocessJob.trigger_reason_code)
+            .where(PassageReprocessJob.passage_id == row.passage_id)
+            .order_by(PassageReprocessJob.created_at.desc())
+            .limit(1)
+        )
         payload.append(
             {
                 "passage_id": row.passage_id,
@@ -54,6 +60,12 @@ def export_passages(
                 if hasattr(row.translation_status, "value")
                 else str(row.translation_status),
                 "needs_reprocess": str(bool(row.needs_reprocess)).lower(),
+                "usability_score": str(row.usability_score),
+                "relevance_score": str(row.relevance_score),
+                "relevance_state": row.relevance_state.value
+                if hasattr(row.relevance_state, "value")
+                else str(row.relevance_state),
+                "trigger_reason_code_last": latest_reason_code or "",
                 "extraction_confidence": str(row.extraction_confidence),
                 "reviewer_state": row.reviewer_state.value,
                 "publish_state": row.publish_state.value,

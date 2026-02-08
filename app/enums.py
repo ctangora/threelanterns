@@ -82,3 +82,9 @@ class TranslationStatus(str, Enum):
 class ReprocessTriggerMode(str, Enum):
     manual = "manual"
     auto_threshold = "auto_threshold"
+
+
+class RelevanceState(str, Enum):
+    accepted = "accepted"
+    borderline = "borderline"
+    filtered = "filtered"

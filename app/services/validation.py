@@ -1,4 +1,11 @@
-from app.constants import COMMONALITY_RELATION_TYPES, FLAG_TYPES, ONTOLOGY_DIMENSIONS, REGION_VOCABULARY, TRADITION_VOCABULARY
+from app.constants import (
+    COMMONALITY_RELATION_TYPES,
+    FLAG_TYPES,
+    ONTOLOGY_DIMENSIONS,
+    REGION_VOCABULARY,
+    REPROCESS_REASON_CODES,
+    TRADITION_VOCABULARY,
+)
 from app.enums import ReviewDecisionEnum
 
 
@@ -43,3 +50,6 @@ def validate_review_input(decision: ReviewDecisionEnum, notes: str | None) -> No
     if decision in {ReviewDecisionEnum.reject, ReviewDecisionEnum.needs_revision}:
         require(bool(notes and notes.strip()), "Notes are required for reject/needs_revision")
 
+
+def validate_reprocess_reason_code(reason_code: str) -> None:
+    require(reason_code in REPROCESS_REASON_CODES, f"Invalid reprocess reason_code: {reason_code}")

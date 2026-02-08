@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.constants import REPROCESS_REASON_LABELS
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.enums import ReprocessTriggerMode
@@ -60,6 +61,21 @@ def _read_optional_bool_query(request: Request, key: str) -> bool | None:
     return None
 
 
+def _read_auto_refresh_seconds(request: Request, key: str, default: int = 0) -> int:
+    raw = request.query_params.get(key)
+    if raw is None or raw.strip() == "":
+        return default
+    if raw.strip() == "off":
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value in {0, 10, 30, 60}:
+        return value
+    return default
+
+
 def _query_string(values: dict[str, str | int | float | bool | None]) -> str:
     filtered = {key: value for key, value in values.items() if value is not None and str(value) != ""}
     return urlencode(filtered)
@@ -74,6 +90,12 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
     needs_reprocess = _read_optional_bool_query(request, "needs_reprocess") if kind == "passage" else None
     max_untranslated_ratio = _read_float_query(request, "max_untranslated_ratio") if kind == "passage" else None
     detected_language = request.query_params.get("detected_language") if kind == "passage" else None
+    min_usability = _read_float_query(request, "min_usability") if kind == "passage" else None
+    min_relevance = _read_float_query(request, "min_relevance") if kind == "passage" else None
+    relevance_state = request.query_params.get("relevance_state") if kind == "passage" else None
+    include_filtered = _read_optional_bool_query(request, "include_filtered") if kind == "passage" else None
+    if include_filtered is None and kind == "passage":
+        include_filtered = False
     sort_by = request.query_params.get("sort_by", "created_at")
     sort_dir = request.query_params.get("sort_dir", "asc")
     error: str | None = None
@@ -90,6 +112,10 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             needs_reprocess=needs_reprocess,
             max_untranslated_ratio=max_untranslated_ratio,
             detected_language=detected_language,
+            min_usability=min_usability,
+            min_relevance=min_relevance,
+            relevance_state=relevance_state,
+            include_filtered=bool(include_filtered) if kind == "passage" else False,
             sort_by=sort_by,
             sort_dir=sort_dir,
         )
@@ -105,6 +131,10 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "needs_reprocess": needs_reprocess,
             "max_untranslated_ratio": max_untranslated_ratio,
             "detected_language": detected_language,
+            "min_usability": min_usability,
+            "min_relevance": min_relevance,
+            "relevance_state": relevance_state,
+            "include_filtered": include_filtered,
             "sort_by": sort_by,
             "sort_dir": sort_dir,
         }
@@ -127,6 +157,10 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "needs_reprocess": queue["needs_reprocess"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
+            "min_usability": queue["min_usability"],
+            "min_relevance": queue["min_relevance"],
+            "relevance_state": queue["relevance_state"],
+            "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
         }
@@ -141,6 +175,10 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "needs_reprocess": queue["needs_reprocess"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
+            "min_usability": queue["min_usability"],
+            "min_relevance": queue["min_relevance"],
+            "relevance_state": queue["relevance_state"],
+            "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
         }
@@ -168,8 +206,13 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "needs_reprocess": queue["needs_reprocess"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
+            "min_usability": queue["min_usability"],
+            "min_relevance": queue["min_relevance"],
+            "relevance_state": queue["relevance_state"],
+            "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
+            "reprocess_reason_options": sorted(REPROCESS_REASON_LABELS.items()),
             "error": error,
         },
     )
@@ -271,7 +314,9 @@ def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
     page_size = _read_positive_int_query(request, "page_size", 50)
     status = request.query_params.get("status")
     trigger_mode = request.query_params.get("trigger_mode")
+    reason_code = request.query_params.get("reason_code")
     passage_id = request.query_params.get("passage_id")
+    auto_refresh_seconds = _read_auto_refresh_seconds(request, "auto_refresh", default=0)
     error: str | None = None
 
     try:
@@ -279,6 +324,7 @@ def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
             db,
             status=status,
             trigger_mode=trigger_mode,
+            reason_code=reason_code,
             passage_id=passage_id,
             page=page,
             page_size=page_size,
@@ -298,7 +344,10 @@ def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
             "page_size": payload["page_size"],
             "status": status or "",
             "trigger_mode": trigger_mode or "",
+            "reason_code": reason_code or "",
             "passage_id": passage_id or "",
+            "auto_refresh": auto_refresh_seconds,
+            "auto_refresh_enabled": auto_refresh_seconds > 0,
             "has_prev": payload["page"] > 1,
             "has_next": payload["page"] * payload["page_size"] < payload["total"],
             "prev_query": _query_string(
@@ -307,7 +356,9 @@ def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
                     "page_size": payload["page_size"],
                     "status": status,
                     "trigger_mode": trigger_mode,
+                    "reason_code": reason_code,
                     "passage_id": passage_id,
+                    "auto_refresh": auto_refresh_seconds if auto_refresh_seconds > 0 else "off",
                 }
             ),
             "next_query": _query_string(
@@ -316,9 +367,12 @@ def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
                     "page_size": payload["page_size"],
                     "status": status,
                     "trigger_mode": trigger_mode,
+                    "reason_code": reason_code,
                     "passage_id": passage_id,
+                    "auto_refresh": auto_refresh_seconds if auto_refresh_seconds > 0 else "off",
                 }
             ),
+            "reprocess_reason_options": sorted(REPROCESS_REASON_LABELS.items()),
             "error": error,
         },
     )
@@ -387,7 +441,8 @@ def review_bulk_submit(
 def reprocess_passage_submit(
     request: Request,
     object_id: str,
-    reason: str = Form("Manual review requested reprocess"),
+    reason_code: str = Form("manual_operator_request"),
+    reason_note: str | None = Form(None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -397,7 +452,8 @@ def reprocess_passage_submit(
             passage_id=object_id,
             actor=settings.operator_id,
             trigger_mode=ReprocessTriggerMode.manual,
-            reason=reason,
+            reason_note=reason_note,
+            reason_code=reason_code,
             correlation_id=f"web-reprocess:{object_id}",
         )
         db.commit()

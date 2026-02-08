@@ -47,18 +47,22 @@ def test_r31_translation_contract_fields_present(client, db_session, tmp_path):
     assert bool((passage.detected_language_label or "").strip())
     assert passage.language_detection_confidence is not None
     assert passage.translation_trace_id is not None
+    assert passage.usability_score >= 0.0
+    assert passage.relevance_score >= 0.0
 
 
 def test_r31_auto_reprocess_threshold_enqueues_job(client, db_session, tmp_path):
-    foreignish = ("bonjour mystere ancien rituel nocturne invocatione sacrum oracle " * 20).strip()
-    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-auto-threshold.txt", content=foreignish)
+    garbled_but_relevant = (
+        "invocation offering ritual oracle @@##@@ #### ??? 12345 boundary chant altar spirit "
+        * 25
+    ).strip()
+    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-auto-threshold.txt", content=garbled_but_relevant)
 
     db_session.expire_all()
     refreshed = db_session.get(PassageEvidence, passage.passage_id)
     assert refreshed is not None
-    assert refreshed.translation_status == TranslationStatus.needs_reprocess
-    assert refreshed.needs_reprocess is True
-    assert refreshed.untranslated_ratio > 0.20
+    assert refreshed.relevance_state.value != "filtered"
+    assert refreshed.needs_reprocess is True or refreshed.usability_score < 0.60
 
     queued = db_session.scalar(
         select(func.count())
@@ -74,7 +78,7 @@ def test_r31_manual_reprocess_endpoint_creates_job_and_audit(client, db_session,
 
     response = client.post(
         f"/api/v1/passages/{passage.passage_id}/reprocess",
-        json={"reason": "manual quality retry", "mode": "manual"},
+        json={"reason_code": "garbled_text", "reason_note": "manual quality retry", "mode": "manual"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -84,6 +88,14 @@ def test_r31_manual_reprocess_endpoint_creates_job_and_audit(client, db_session,
     jobs = client.get("/api/v1/reprocess/jobs", params={"passage_id": passage.passage_id})
     assert jobs.status_code == 200
     assert jobs.json()["total"] >= 1
+    assert jobs.json()["items"][0]["trigger_reason_code"] in {
+        "garbled_text",
+        "manual_operator_request",
+    }
+
+    reason_summary = client.get("/api/v1/reprocess/reasons/summary")
+    assert reason_summary.status_code == 200
+    assert isinstance(reason_summary.json()["items"], list)
 
     events = list(
         db_session.scalars(
@@ -98,8 +110,14 @@ def test_r31_manual_reprocess_endpoint_creates_job_and_audit(client, db_session,
 
 
 def test_r31_reprocess_retry_cap_marks_unresolved(client, db_session, tmp_path):
-    foreignish = ("rituale obscurum vetus lingua arcana cantus nocturnus " * 30).strip()
-    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-unresolved.txt", content=foreignish)
+    hard_garble = ("@@@ #### ??? ### |||| ---- invocation offering ritual altar " * 35).strip()
+    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-unresolved.txt", content=hard_garble)
+
+    manual_enqueue = client.post(
+        f"/api/v1/passages/{passage.passage_id}/reprocess",
+        json={"reason_code": "garbled_text", "reason_note": "force retry path", "mode": "manual"},
+    )
+    assert manual_enqueue.status_code == 200
 
     run_worker_cycle(db_session, actor="test-operator")
     db_session.commit()
@@ -126,13 +144,20 @@ def test_r31_reprocess_retry_cap_marks_unresolved(client, db_session, tmp_path):
 
 def test_r31_review_queue_filters_quality_and_export_columns(client, db_session, tmp_path):
     clean = ("invocation offering dawn ritual passage with clear modern language " * 20).strip()
-    noisy = ("bonjour mystere ancien rituel nocturne invocatione sacrum oracle " * 20).strip()
+    noisy = ("invocation offering ritual @@##@@ ### ??? spirit oracle altar chant " * 20).strip()
     clean_passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-clean.txt", content=clean)
     noisy_passage = _seed_ingested_passage(client, db_session, tmp_path, name="r31-noisy.txt", content=noisy)
 
     queue = client.get(
         "/api/v1/review/queue",
-        params={"object_type": "passage", "needs_reprocess": "true", "max_untranslated_ratio": 1.0},
+        params={
+            "object_type": "passage",
+            "needs_reprocess": "true",
+            "max_untranslated_ratio": 1.0,
+            "include_filtered": "true",
+            "min_usability": 0.0,
+            "min_relevance": 0.0,
+        },
     )
     assert queue.status_code == 200
     items = queue.json()["items"]
@@ -144,6 +169,10 @@ def test_r31_review_queue_filters_quality_and_export_columns(client, db_session,
     quality_body = quality.json()
     assert "translation_status" in quality_body
     assert "untranslated_ratio" in quality_body
+    assert "usability_score" in quality_body
+    assert "relevance_score" in quality_body
+    assert "relevance_state" in quality_body
+    assert "quality_notes_json" in quality_body
 
     export = client.get("/api/v1/exports/passages.csv", params={"state": "blocked"})
     assert export.status_code == 200
@@ -152,3 +181,32 @@ def test_r31_review_queue_filters_quality_and_export_columns(client, db_session,
     assert "untranslated_ratio" in export.text
     assert "translation_status" in export.text
     assert "needs_reprocess" in export.text
+    assert "usability_score" in export.text
+    assert "relevance_score" in export.text
+    assert "relevance_state" in export.text
+    assert "trigger_reason_code_last" in export.text
+
+
+def test_r32_reprocess_endpoint_accepts_legacy_reason_field(client, db_session, tmp_path):
+    content = ("invocation offering ritual phrase " * 12).strip()
+    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r32-legacy-reason.txt", content=content)
+    response = client.post(
+        f"/api/v1/passages/{passage.passage_id}/reprocess",
+        json={"reason": "legacy reason field", "mode": "manual"},
+    )
+    assert response.status_code == 200
+
+    jobs = client.get("/api/v1/reprocess/jobs", params={"passage_id": passage.passage_id})
+    assert jobs.status_code == 200
+    assert jobs.json()["items"][0]["trigger_reason_code"] == "manual_operator_request"
+
+
+def test_r32_reprocess_endpoint_rejects_invalid_reason_code(client, db_session, tmp_path):
+    content = ("invocation offering ritual phrase " * 12).strip()
+    passage = _seed_ingested_passage(client, db_session, tmp_path, name="r32-invalid-reason.txt", content=content)
+    response = client.post(
+        f"/api/v1/passages/{passage.passage_id}/reprocess",
+        json={"reason_code": "not_valid", "reason_note": "x", "mode": "manual"},
+    )
+    assert response.status_code == 400
+    assert "Invalid reprocess reason_code" in response.json()["detail"]

@@ -143,6 +143,32 @@ COMMONALITY_RELATION_TYPES = {"isVersionOf", "isRelatedTo", "sharesPatternWith",
 LANGUAGE_NORMALIZED_CANONICAL = "eng"
 TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD = 0.20
 PASSAGE_REPROCESS_MAX_ATTEMPTS = 2
+PASSAGE_USABILITY_REPROCESS_THRESHOLD = 0.60
+PASSAGE_RELEVANCE_ACCEPT_THRESHOLD = 0.50
+PASSAGE_RELEVANCE_FILTER_THRESHOLD = 0.30
+PASSAGE_QUALITY_VERSION = "r32_v1"
+
+REPROCESS_REASON_CODES = {
+    "garbled_text",
+    "low_usability_score",
+    "low_relevance_score",
+    "parser_artifact",
+    "translation_incomplete",
+    "wrong_language_detected",
+    "source_mismatch",
+    "manual_operator_request",
+}
+
+REPROCESS_REASON_LABELS = {
+    "garbled_text": "Garbled text",
+    "low_usability_score": "Low usability score",
+    "low_relevance_score": "Low relevance score",
+    "parser_artifact": "Parser artifact",
+    "translation_incomplete": "Translation incomplete",
+    "wrong_language_detected": "Wrong language detected",
+    "source_mismatch": "Source mismatch",
+    "manual_operator_request": "Manual operator request",
+}
 
 LANGUAGE_LABELS = {
     "eng": "English",

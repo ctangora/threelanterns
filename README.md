@@ -98,12 +98,15 @@ Troubleshooting:
 - `POST /api/v1/passages/{passage_id}/reprocess`
 - `GET /api/v1/passages/{passage_id}/quality`
 - `GET /api/v1/reprocess/jobs`
+- `GET /api/v1/reprocess/reasons/summary`
 
 Passages now include:
 
 - modern-English normalized text in `excerpt_normalized`
 - translation quality metrics (`untranslated_ratio`, detected language, status)
 - auto reprocess queueing when untranslated ratio exceeds `0.20`
+- quality metrics (`usability_score`, `relevance_score`, `relevance_state`)
+- review queue filtering by usability/relevance and filtered-content visibility
 
 ### Batch 25-source cycle
 
@@ -123,6 +126,12 @@ Daily operations summary:
 
 ```bash
 python3 scripts/daily_m3_report.py
+```
+
+Backfill quality scoring for existing passages:
+
+```bash
+python3 scripts/backfill_passage_quality.py
 ```
 
 Requeue dead-letter jobs with required rationale:

@@ -66,11 +66,21 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _add_column_if_missing(engine, "passage_evidence", "last_reprocess_at", "TIMESTAMP")
     _add_column_if_missing(engine, "passage_evidence", "translation_provider", "VARCHAR(80)")
     _add_column_if_missing(engine, "passage_evidence", "translation_trace_id", "VARCHAR(32)")
+    _add_column_if_missing(engine, "passage_evidence", "usability_score", "REAL DEFAULT 0")
+    _add_column_if_missing(engine, "passage_evidence", "relevance_score", "REAL DEFAULT 0")
+    _add_column_if_missing(engine, "passage_evidence", "relevance_state", "VARCHAR(30) DEFAULT 'accepted'")
+    _add_column_if_missing(engine, "passage_evidence", "quality_notes_json", "TEXT DEFAULT '{}'")
+    _add_column_if_missing(engine, "passage_evidence", "quality_version", "VARCHAR(40) DEFAULT 'r32_v1'")
     with engine.begin() as connection:
         connection.execute(text("UPDATE passage_evidence SET translation_status = 'translated' WHERE translation_status IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET untranslated_ratio = 0 WHERE untranslated_ratio IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET needs_reprocess = 0 WHERE needs_reprocess IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET reprocess_count = 0 WHERE reprocess_count IS NULL"))
+        connection.execute(text("UPDATE passage_evidence SET usability_score = 0 WHERE usability_score IS NULL"))
+        connection.execute(text("UPDATE passage_evidence SET relevance_score = 0 WHERE relevance_score IS NULL"))
+        connection.execute(text("UPDATE passage_evidence SET relevance_state = 'accepted' WHERE relevance_state IS NULL"))
+        connection.execute(text("UPDATE passage_evidence SET quality_notes_json = '{}' WHERE quality_notes_json IS NULL"))
+        connection.execute(text("UPDATE passage_evidence SET quality_version = 'r32_v1' WHERE quality_version IS NULL"))
 
     _create_table_if_missing(
         engine,
@@ -83,6 +93,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
           status VARCHAR(30) NOT NULL,
           trigger_mode VARCHAR(40) NOT NULL,
           trigger_reason TEXT NOT NULL,
+          trigger_reason_code VARCHAR(80) NOT NULL DEFAULT 'manual_operator_request',
+          trigger_reason_note TEXT,
           attempt_count INTEGER NOT NULL DEFAULT 0,
           max_attempts INTEGER NOT NULL DEFAULT 2,
           used_pdf_crossref INTEGER NOT NULL DEFAULT 0,
@@ -97,6 +109,19 @@ def ensure_runtime_schema(engine: Engine) -> None:
         )
         """,
     )
+    _add_column_if_missing(
+        engine,
+        "passage_reprocess_jobs",
+        "trigger_reason_code",
+        "VARCHAR(80) DEFAULT 'manual_operator_request'",
+    )
+    _add_column_if_missing(engine, "passage_reprocess_jobs", "trigger_reason_note", "TEXT")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE passage_reprocess_jobs SET trigger_reason_code = 'manual_operator_request' WHERE trigger_reason_code IS NULL"
+            )
+        )
     _create_table_if_missing(
         engine,
         "passage_translation_revisions",
@@ -127,8 +152,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_source_witness_group", "source_material_records", "witness_group_id")
     _create_index_if_missing(engine, "ix_passage_untranslated_ratio", "passage_evidence", "untranslated_ratio")
     _create_index_if_missing(engine, "ix_passage_needs_reprocess", "passage_evidence", "needs_reprocess")
+    _create_index_if_missing(engine, "ix_passage_usability_score", "passage_evidence", "usability_score")
+    _create_index_if_missing(engine, "ix_passage_relevance_score", "passage_evidence", "relevance_score")
+    _create_index_if_missing(engine, "ix_passage_relevance_state", "passage_evidence", "relevance_state")
     _create_index_if_missing(engine, "ix_passage_reprocess_status", "passage_reprocess_jobs", "status")
     _create_index_if_missing(engine, "ix_passage_reprocess_pdg", "passage_reprocess_jobs", "passage_id")
+    _create_index_if_missing(engine, "ix_reprocess_reason_code", "passage_reprocess_jobs", "trigger_reason_code")
     _create_index_if_missing(engine, "ix_passage_reprocess_created_at", "passage_reprocess_jobs", "created_at")
     _create_index_if_missing(engine, "ix_translation_revision_passage", "passage_translation_revisions", "passage_id")
     _create_index_if_missing(engine, "ix_translation_revision_created_at", "passage_translation_revisions", "created_at")
