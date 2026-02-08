@@ -72,3 +72,13 @@ class JobStatus(str, Enum):
     failed = "failed"
     dead_letter = "dead_letter"
 
+
+class TranslationStatus(str, Enum):
+    translated = "translated"
+    needs_reprocess = "needs_reprocess"
+    unresolved = "unresolved"
+
+
+class ReprocessTriggerMode(str, Enum):
+    manual = "manual"
+    auto_threshold = "auto_threshold"

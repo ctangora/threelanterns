@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Passage Reprocess Jobs</h2>
+{% if error %}
+<p><strong>Error:</strong> {{ error }}</p>
+{% endif %}
+<p>Total jobs: {{ total }}</p>
+<p>Showing page {{ page }} (page size {{ page_size }}) with {{ items|length }} item(s).</p>
+<form method="get" action="/review/reprocess-jobs" class="card">
+  <label>Status
+    <select name="status">
+      <option value="" {% if status == "" %}selected{% endif %}>(any)</option>
+      <option value="pending" {% if status == "pending" %}selected{% endif %}>pending</option>
+      <option value="running" {% if status == "running" %}selected{% endif %}>running</option>
+      <option value="completed" {% if status == "completed" %}selected{% endif %}>completed</option>
+      <option value="failed" {% if status == "failed" %}selected{% endif %}>failed</option>
+      <option value="dead_letter" {% if status == "dead_letter" %}selected{% endif %}>dead_letter</option>
+    </select>
+  </label>
+  <label>Trigger mode
+    <select name="trigger_mode">
+      <option value="" {% if trigger_mode == "" %}selected{% endif %}>(any)</option>
+      <option value="manual" {% if trigger_mode == "manual" %}selected{% endif %}>manual</option>
+      <option value="auto_threshold" {% if trigger_mode == "auto_threshold" %}selected{% endif %}>auto_threshold</option>
+    </select>
+  </label>
+  <label>Passage ID
+    <input type="text" name="passage_id" value="{{ passage_id }}" />
+  </label>
+  <label>Page size
+    <input type="number" min="1" max="200" name="page_size" value="{{ page_size }}" />
+  </label>
+  <button type="submit">Apply Filters</button>
+</form>
+<p>
+  {% if has_prev %}
+  <a href="/review/reprocess-jobs?{{ prev_query }}">Previous</a>
+  {% endif %}
+  {% if has_prev and has_next %} | {% endif %}
+  {% if has_next %}
+  <a href="/review/reprocess-jobs?{{ next_query }}">Next</a>
+  {% endif %}
+</p>
+{% for item in items %}
+<section class="card">
+  <h3><a href="/records/{{ item.reprocess_job_id }}">{{ item.reprocess_job_id }}</a></h3>
+  <p>Passage: <a href="/records/{{ item.passage_id }}">{{ item.passage_id }}</a></p>
+  <p>Status: {{ item.status }} | Trigger: {{ item.trigger_mode }} | Attempts: {{ item.attempt_count }}/{{ item.max_attempts }}</p>
+  <p>Used PDF cross-ref: {{ item.used_pdf_crossref }} | Used external reference: {{ item.used_external_reference }}</p>
+  {% if item.last_error %}
+  <pre>{{ item.last_error }}</pre>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

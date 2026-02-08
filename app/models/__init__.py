@@ -6,6 +6,8 @@ from app.models.core import (
     IngestionJob,
     JobAttempt,
     PassageEvidence,
+    PassageReprocessJob,
+    PassageTranslationRevision,
     ProposalTrace,
     ReviewDecision,
     RitualPatternTag,
@@ -22,6 +24,8 @@ __all__ = [
     "IngestionJob",
     "JobAttempt",
     "PassageEvidence",
+    "PassageReprocessJob",
+    "PassageTranslationRevision",
     "ProposalTrace",
     "ReviewDecision",
     "RitualPatternTag",
@@ -29,4 +33,3 @@ __all__ = [
     "TextRecord",
     "VocabularyPendingTerm",
 ]
-

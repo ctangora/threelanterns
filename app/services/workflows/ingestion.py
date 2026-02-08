@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.enums import JobStatus
-from app.models.core import IngestionJob, JobAttempt, SourceMaterialRecord
+from app.enums import JobStatus, ReprocessTriggerMode
+from app.models.core import IngestionJob, JobAttempt, PassageReprocessJob, SourceMaterialRecord
 from app.services.ai.proposals import propose_for_passage
 from app.services.artifacts import artifact_exists, store_text_artifact
 from app.services.audit import emit_audit_event
@@ -14,6 +14,7 @@ from app.services.extraction import build_passage_evidence
 from app.services.parsers import parse_source_file_with_metadata
 from app.services.utils import normalize_to_english, now_utc, sha256_file, sha256_text
 from app.services.validation import ValidationError, require
+from app.services.workflows.reprocess import enqueue_reprocess_job, run_reprocess_cycle
 
 
 def create_ingestion_job(
@@ -142,12 +143,27 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
             content=raw_text,
             actor=actor,
             max_passages=settings.max_passages_per_source,
+            translation_idempotency_root=f"{job.job_id}:{job.attempt_count}:translation",
         )
         source.digitization_status = "complete"
         source.updated_by = actor
 
         created = {"tags": 0, "links": 0, "flags": 0}
+        auto_reprocess_queued = 0
         for passage in passages:
+            if passage.needs_reprocess:
+                enqueue_reprocess_job(
+                    db,
+                    passage_id=passage.passage_id,
+                    actor=actor,
+                    trigger_mode=ReprocessTriggerMode.auto_threshold,
+                    reason=(
+                        "Auto reprocess queued after translation quality gate: "
+                        f"untranslated_ratio={passage.untranslated_ratio}"
+                    ),
+                    correlation_id=f"{correlation_id}:{passage.passage_id}:auto",
+                )
+                auto_reprocess_queued += 1
             result = propose_for_passage(
                 db,
                 passage=passage,
@@ -180,6 +196,7 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
                 "tags_created": created["tags"],
                 "links_created": created["links"],
                 "flags_created": created["flags"],
+                "auto_reprocess_queued": auto_reprocess_queued,
             },
         )
     except Exception as exc:
@@ -216,7 +233,11 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         )
 
 
-def run_worker_cycle(db: Session, *, actor: str) -> IngestionJob | None:
+def run_worker_cycle(db: Session, *, actor: str) -> IngestionJob | PassageReprocessJob | None:
+    reprocess_job = run_reprocess_cycle(db, actor=actor)
+    if reprocess_job is not None:
+        return reprocess_job
+
     correlation_id = f"wrk-{now_utc().isoformat()}"
     job = claim_next_pending_job(db, actor=actor, correlation_id=correlation_id)
     if not job:

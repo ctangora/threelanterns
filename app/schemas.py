@@ -126,6 +126,42 @@ class BulkReviewResponse(BaseModel):
     review_ids: list[str]
 
 
+class PassageReprocessRequest(BaseModel):
+    reason: str = Field(min_length=1)
+    mode: Literal["manual", "auto"] = "manual"
+
+
+class PassageReprocessResponse(BaseModel):
+    reprocess_job_id: str
+    passage_id: str
+    status: str
+    trigger_mode: str
+    attempt_count: int
+    max_attempts: int
+
+
+class PassageQualityResponse(BaseModel):
+    passage_id: str
+    translation_status: str
+    needs_reprocess: bool
+    untranslated_ratio: float
+    detected_language_code: str | None = None
+    detected_language_label: str | None = None
+    language_detection_confidence: float | None = None
+    reprocess_count: int
+    last_reprocess_at: datetime | None = None
+    translation_provider: str | None = None
+    translation_trace_id: str | None = None
+    unresolved: bool
+
+
+class ReprocessJobQueueResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[dict[str, Any]]
+
+
 class ReviewMetricsResponse(BaseModel):
     generated_at: datetime
     backlog: dict[str, dict[str, int]]

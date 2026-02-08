@@ -14,7 +14,7 @@ Start with the milestone handoff docs in `docs/three-lanterns/`:
 - `docs/three-lanterns/06_validation_and_acceptance.md`
 - `docs/three-lanterns/appendix/sample_annotation_template.md`
 
-## Milestone 2 Implementation
+## Milestone 2 / Release 3 Implementation
 
 ### Install
 
@@ -29,6 +29,12 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `OPENAI_API_KEY`
 - `OPERATOR_ID`
+- Optional for R3 tuning:
+  - `USE_MOCK_AI` (`true` for local dev, `false` for release acceptance)
+  - `MAX_SOURCE_CHARS`
+  - `MAX_PASSAGES_PER_SOURCE`
+  - `MAX_REGISTER_FINGERPRINT_CHARS`
+  - `PARSER_TIMEOUT_SECONDS`
 
 ### Migrate
 
@@ -71,9 +77,66 @@ Troubleshooting:
 - `/review/tags`
 - `/review/links`
 - `/review/flags`
+- `/review/reprocess-jobs`
+- `/review/metrics`
+- `/search`
+
+### Internal API (Release 3 additions)
+
+- `POST /api/v1/intake/register/batch`
+- `GET /api/v1/review/metrics`
+- `POST /api/v1/review/bulk`
+- `GET /api/v1/search`
+- `GET /api/v1/exports/passages.csv`
+- `GET /api/v1/exports/tags.csv`
+- `GET /api/v1/exports/links.csv`
+- `GET /api/v1/exports/flags.csv`
+- `GET /health/details`
+
+### Release 3.1 Translation/Reprocess API
+
+- `POST /api/v1/passages/{passage_id}/reprocess`
+- `GET /api/v1/passages/{passage_id}/quality`
+- `GET /api/v1/reprocess/jobs`
+
+Passages now include:
+
+- modern-English normalized text in `excerpt_normalized`
+- translation quality metrics (`untranslated_ratio`, detected language, status)
+- auto reprocess queueing when untranslated ratio exceeds `0.20`
 
 ### Batch 25-source cycle
 
 ```bash
 python3 scripts/run_m2_cycle.py
 ```
+
+### Release 3 Intake / Operations Scripts
+
+R3A intake run (up to 100 local sources):
+
+```bash
+python3 scripts/run_r3a_cycle.py
+```
+
+Daily operations summary:
+
+```bash
+python3 scripts/daily_m3_report.py
+```
+
+Requeue dead-letter jobs with required rationale:
+
+```bash
+python3 scripts/requeue_dead_letter.py --all --reason "parser fix deployed"
+```
+
+```bash
+python3 scripts/requeue_dead_letter.py --job-id job_123 --reason "manual retry"
+```
+
+### Release 3 Planning Docs
+
+- `docs/three-lanterns/milestone-3-plan.md`
+- `docs/three-lanterns/milestone-3-runbook.md`
+- `docs/three-lanterns/milestone-3-acceptance.md`

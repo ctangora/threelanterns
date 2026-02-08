@@ -141,3 +141,14 @@ FLAG_TYPES = {
 COMMONALITY_RELATION_TYPES = {"isVersionOf", "isRelatedTo", "sharesPatternWith", "isDerivativeOf"}
 
 LANGUAGE_NORMALIZED_CANONICAL = "eng"
+TRANSLATION_UNTRANSLATED_RATIO_THRESHOLD = 0.20
+PASSAGE_REPROCESS_MAX_ATTEMPTS = 2
+
+LANGUAGE_LABELS = {
+    "eng": "English",
+    "ang": "Old English",
+    "enm": "Middle English",
+    "lat": "Latin",
+    "grc": "Ancient Greek",
+    "und": "Undetermined",
+}

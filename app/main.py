@@ -5,15 +5,17 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.routes import audit, exports, health, intake, jobs, records, review, search
+from app.api.routes import audit, exports, health, intake, jobs, passages, records, reprocess, review, search
 from app.config import get_settings
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
+from app.services.schema import ensure_runtime_schema
 from app.web.routes import router as web_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
+    ensure_runtime_schema(engine)
     with SessionLocal() as db:
         db.execute(text("SELECT 1"))
     _ = settings.operator_id
@@ -33,6 +35,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(intake.router)
     app.include_router(jobs.router)
+    app.include_router(passages.router)
+    app.include_router(reprocess.router)
     app.include_router(review.router)
     app.include_router(search.router)
     app.include_router(exports.router)

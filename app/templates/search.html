@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Internal Search</h2>
+<form method="get" action="/search" class="card">
+  <label>Query
+    <input type="text" name="q" value="{{ q }}" />
+  </label>
+  <label>Object type
+    <select name="object_type">
+      <option value="" {% if not object_type %}selected{% endif %}>all</option>
+      <option value="passage" {% if object_type == "passage" %}selected{% endif %}>passage</option>
+      <option value="tag" {% if object_type == "tag" %}selected{% endif %}>tag</option>
+      <option value="link" {% if object_type == "link" %}selected{% endif %}>link</option>
+      <option value="flag" {% if object_type == "flag" %}selected{% endif %}>flag</option>
+    </select>
+  </label>
+  <label>Tag
+    <input type="text" name="tag" value="{{ tag }}" />
+  </label>
+  <label>Culture region
+    <input type="text" name="culture_region" value="{{ culture_region }}" />
+  </label>
+  <label>Review state
+    <select name="review_state">
+      <option value="" {% if not review_state %}selected{% endif %}>any</option>
+      <option value="proposed" {% if review_state == "proposed" %}selected{% endif %}>proposed</option>
+      <option value="approved" {% if review_state == "approved" %}selected{% endif %}>approved</option>
+      <option value="rejected" {% if review_state == "rejected" %}selected{% endif %}>rejected</option>
+      <option value="needs_revision" {% if review_state == "needs_revision" %}selected{% endif %}>needs_revision</option>
+    </select>
+  </label>
+  <label>Limit
+    <input type="number" min="1" max="500" name="limit" value="{{ limit }}" />
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+{% if error %}
+<p><strong>Error:</strong> {{ error }}</p>
+{% endif %}
+
+<p>Total hits: {{ hits|length }}</p>
+{% for hit in hits %}
+<section class="card">
+  <h3><a href="/records/{{ hit.object_id }}">{{ hit.object_type }} / {{ hit.object_id }}</a></h3>
+  <p>Score: {{ hit.score }} | Review state: {{ hit.review_state }}</p>
+  <pre>{{ hit.snippet }}</pre>
+</section>
+{% endfor %}
+{% endblock %}

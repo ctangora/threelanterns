@@ -34,7 +34,7 @@ def _seed_review_data(client, db_session, tmp_path):
 def test_review_pages_render_without_500(client, db_session, tmp_path):
     _seed_review_data(client, db_session, tmp_path)
 
-    for path in ["/review/passages", "/review/tags", "/review/links", "/review/flags"]:
+    for path in ["/review/passages", "/review/tags", "/review/links", "/review/flags", "/review/reprocess-jobs"]:
         response = client.get(path)
         assert response.status_code == 200
 

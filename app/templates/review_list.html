@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>{{ title }}</h2>
+{% if error %}
+<p><strong>Error:</strong> {{ error }}</p>
+{% endif %}
 <p>Total in queue: {{ total }}</p>
 <p>Showing page {{ page }} (page size {{ page_size }}) with {{ items|length }} item(s).</p>
 <form method="get" action="{{ base_path }}" class="card">
@@ -15,6 +18,21 @@
   <label>Source ID (passage queue only)
     <input type="text" name="source_id" value="{{ source_id or '' }}" />
   </label>
+  {% if kind == "passage" %}
+  <label>Needs reprocess
+    <select name="needs_reprocess">
+      <option value="" {% if needs_reprocess is none %}selected{% endif %}>(any)</option>
+      <option value="true" {% if needs_reprocess is sameas true %}selected{% endif %}>true</option>
+      <option value="false" {% if needs_reprocess is sameas false %}selected{% endif %}>false</option>
+    </select>
+  </label>
+  <label>Max untranslated ratio
+    <input type="number" min="0" max="1" step="0.01" name="max_untranslated_ratio" value="{{ max_untranslated_ratio if max_untranslated_ratio is not none else '' }}" />
+  </label>
+  <label>Detected language
+    <input type="text" name="detected_language" value="{{ detected_language or '' }}" placeholder="eng, Old English, lat..." />
+  </label>
+  {% endif %}
   <label>Min confidence
     <input type="number" min="0" max="1" step="0.01" name="min_confidence" value="{{ min_confidence if min_confidence is not none else '' }}" />
   </label>
@@ -60,8 +78,25 @@
 {% for item in items %}
 <section class="card">
   <h3><a href="/records/{{ item.object_id }}">{{ item.object_id }}</a></h3>
+  {% if kind == "passage" %}
+  <p>
+    Quality:
+    <strong>{{ item.translation_status }}</strong>
+    | ratio={{ item.untranslated_ratio }}
+    | language={{ item.detected_language_label or item.detected_language_code or "und" }}
+    | needs_reprocess={{ item.needs_reprocess }}
+  </p>
+  {% endif %}
   <label><input type="checkbox" form="bulk-review-form" name="object_ids" value="{{ item.object_id }}" /> Select for bulk</label>
   <pre>{{ item.payload_pretty }}</pre>
+  {% if kind == "passage" %}
+  <form method="post" action="/review/passages/{{ item.object_id }}/reprocess">
+    <label>Reprocess reason
+      <input name="reason" type="text" value="Manual review requested reprocess" />
+    </label>
+    <button type="submit">Queue Reprocess</button>
+  </form>
+  {% endif %}
   <form method="post" action="/review/{{ kind }}/{{ item.object_id }}">
     <label>Decision
       <select name="decision">

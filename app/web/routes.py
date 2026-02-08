@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
+from app.enums import ReprocessTriggerMode
 from app.models.core import IngestionJob
 from app.schemas import RegisterRequest
 from app.services.intake import discover_local_sources, register_source
@@ -17,6 +18,7 @@ from app.services.review import apply_bulk_review, apply_review_decision, review
 from app.services.search import search_records
 from app.services.validation import ValidationError
 from app.services.workflows.ingestion import create_ingestion_job
+from app.services.workflows.reprocess import enqueue_reprocess_job, list_reprocess_jobs
 
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(tags=["web"])
@@ -46,7 +48,19 @@ def _read_float_query(request: Request, key: str) -> float | None:
     return value
 
 
-def _query_string(values: dict[str, str | int | float | None]) -> str:
+def _read_optional_bool_query(request: Request, key: str) -> bool | None:
+    raw = request.query_params.get(key)
+    if raw is None or raw.strip() == "":
+        return None
+    lowered = raw.strip().lower()
+    if lowered in {"true", "1", "yes"}:
+        return True
+    if lowered in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _query_string(values: dict[str, str | int | float | bool | None]) -> str:
     filtered = {key: value for key, value in values.items() if value is not None and str(value) != ""}
     return urlencode(filtered)
 
@@ -57,20 +71,44 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
     state = request.query_params.get("state", "proposed")
     source_id = request.query_params.get("source_id")
     min_confidence = _read_float_query(request, "min_confidence")
+    needs_reprocess = _read_optional_bool_query(request, "needs_reprocess") if kind == "passage" else None
+    max_untranslated_ratio = _read_float_query(request, "max_untranslated_ratio") if kind == "passage" else None
+    detected_language = request.query_params.get("detected_language") if kind == "passage" else None
     sort_by = request.query_params.get("sort_by", "created_at")
     sort_dir = request.query_params.get("sort_dir", "asc")
-    queue = review_queue(
-        db,
-        kind,
-        page=page,
-        page_size=page_size,
-        max_page_size=200,
-        state=state,
-        source_id=source_id,
-        min_confidence=min_confidence,
-        sort_by=sort_by,
-        sort_dir=sort_dir,
-    )
+    error: str | None = None
+    try:
+        queue = review_queue(
+            db,
+            kind,
+            page=page,
+            page_size=page_size,
+            max_page_size=200,
+            state=state,
+            source_id=source_id,
+            min_confidence=min_confidence,
+            needs_reprocess=needs_reprocess,
+            max_untranslated_ratio=max_untranslated_ratio,
+            detected_language=detected_language,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+    except ValidationError as exc:
+        queue = {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "state": state,
+            "source_id": source_id,
+            "min_confidence": min_confidence,
+            "needs_reprocess": needs_reprocess,
+            "max_untranslated_ratio": max_untranslated_ratio,
+            "detected_language": detected_language,
+            "sort_by": sort_by,
+            "sort_dir": sort_dir,
+        }
+        error = str(exc)
 
     rendered_items: list[dict] = []
     for item in queue["items"]:
@@ -86,6 +124,9 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "needs_reprocess": queue["needs_reprocess"],
+            "max_untranslated_ratio": queue["max_untranslated_ratio"],
+            "detected_language": queue["detected_language"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
         }
@@ -97,6 +138,9 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "needs_reprocess": queue["needs_reprocess"],
+            "max_untranslated_ratio": queue["max_untranslated_ratio"],
+            "detected_language": queue["detected_language"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
         }
@@ -121,8 +165,12 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "needs_reprocess": queue["needs_reprocess"],
+            "max_untranslated_ratio": queue["max_untranslated_ratio"],
+            "detected_language": queue["detected_language"],
             "sort_by": queue["sort_by"],
             "sort_dir": queue["sort_dir"],
+            "error": error,
         },
     )
 
@@ -217,6 +265,65 @@ def review_metrics_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "review_metrics.html", {"metrics": metrics})
 
 
+@router.get("/review/reprocess-jobs")
+def review_reprocess_jobs_page(request: Request, db: Session = Depends(get_db)):
+    page = _read_positive_int_query(request, "page", 1)
+    page_size = _read_positive_int_query(request, "page_size", 50)
+    status = request.query_params.get("status")
+    trigger_mode = request.query_params.get("trigger_mode")
+    passage_id = request.query_params.get("passage_id")
+    error: str | None = None
+
+    try:
+        payload = list_reprocess_jobs(
+            db,
+            status=status,
+            trigger_mode=trigger_mode,
+            passage_id=passage_id,
+            page=page,
+            page_size=page_size,
+            max_page_size=200,
+        )
+    except ValidationError as exc:
+        payload = {"items": [], "total": 0, "page": page, "page_size": page_size}
+        error = str(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "review_reprocess_jobs.html",
+        {
+            "items": payload["items"],
+            "total": payload["total"],
+            "page": payload["page"],
+            "page_size": payload["page_size"],
+            "status": status or "",
+            "trigger_mode": trigger_mode or "",
+            "passage_id": passage_id or "",
+            "has_prev": payload["page"] > 1,
+            "has_next": payload["page"] * payload["page_size"] < payload["total"],
+            "prev_query": _query_string(
+                {
+                    "page": max(1, payload["page"] - 1),
+                    "page_size": payload["page_size"],
+                    "status": status,
+                    "trigger_mode": trigger_mode,
+                    "passage_id": passage_id,
+                }
+            ),
+            "next_query": _query_string(
+                {
+                    "page": payload["page"] + 1,
+                    "page_size": payload["page_size"],
+                    "status": status,
+                    "trigger_mode": trigger_mode,
+                    "passage_id": passage_id,
+                }
+            ),
+            "error": error,
+        },
+    )
+
+
 @router.post("/review/{kind}/{object_id}")
 def review_submit(
     kind: str,
@@ -273,6 +380,31 @@ def review_bulk_submit(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     referer = request.headers.get("referer") or f"/review/{kind}s"
+    return RedirectResponse(url=referer, status_code=303)
+
+
+@router.post("/review/passages/{object_id}/reprocess")
+def reprocess_passage_submit(
+    request: Request,
+    object_id: str,
+    reason: str = Form("Manual review requested reprocess"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        enqueue_reprocess_job(
+            db,
+            passage_id=object_id,
+            actor=settings.operator_id,
+            trigger_mode=ReprocessTriggerMode.manual,
+            reason=reason,
+            correlation_id=f"web-reprocess:{object_id}",
+        )
+        db.commit()
+    except ValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    referer = request.headers.get("referer") or "/review/passages"
     return RedirectResponse(url=referer, status_code=303)
 
 

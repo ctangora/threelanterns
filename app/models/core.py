@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     JSON,
     DateTime,
     Enum,
@@ -18,6 +19,7 @@ from app.enums import (
     DateConfidence,
     JobStatus,
     PublishState,
+    ReprocessTriggerMode,
     RecordStatus,
     RelationType,
     ReviewDecisionEnum,
@@ -25,6 +27,7 @@ from app.enums import (
     ReviewableObjectType,
     RightsStatus,
     SourceObjectType,
+    TranslationStatus,
 )
 from app.models.base import Base, OperatorMixin, TimestampedMixin, prefixed_id
 
@@ -89,6 +92,8 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
         Index("ix_passage_source_id", "source_id"),
         Index("ix_passage_reviewer_state", "reviewer_state"),
         Index("ix_passage_extraction_confidence", "extraction_confidence"),
+        Index("ix_passage_untranslated_ratio", "untranslated_ratio"),
+        Index("ix_passage_needs_reprocess", "needs_reprocess"),
         Index("ix_passage_created_at", "created_at"),
     )
 
@@ -103,6 +108,18 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
     extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False)
     reviewer_state: Mapped[ReviewerState] = mapped_column(Enum(ReviewerState), default=ReviewerState.proposed, nullable=False)
     publish_state: Mapped[PublishState] = mapped_column(Enum(PublishState), default=PublishState.blocked, nullable=False)
+    translation_status: Mapped[TranslationStatus] = mapped_column(
+        Enum(TranslationStatus), default=TranslationStatus.translated, nullable=False
+    )
+    detected_language_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    detected_language_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    language_detection_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    untranslated_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    needs_reprocess: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reprocess_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_reprocess_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    translation_provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    translation_trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     text: Mapped["TextRecord"] = relationship(back_populates="passages")
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="passages")
@@ -203,6 +220,51 @@ class IngestionJob(Base, TimestampedMixin, OperatorMixin):
 
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="jobs")
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
+
+
+class PassageReprocessJob(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "passage_reprocess_jobs"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_passage_reprocess_jobs_idempotency_key"),
+        Index("ix_passage_reprocess_status", "status"),
+        Index("ix_passage_reprocess_pdg", "passage_id"),
+        Index("ix_passage_reprocess_created_at", "created_at"),
+    )
+
+    reprocess_job_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("rpj"))
+    passage_id: Mapped[str] = mapped_column(ForeignKey("passage_evidence.passage_id"), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.pending, nullable=False)
+    trigger_mode: Mapped[ReprocessTriggerMode] = mapped_column(Enum(ReprocessTriggerMode), nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    used_pdf_crossref: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    used_external_reference: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_context_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class PassageTranslationRevision(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "passage_translation_revisions"
+    __table_args__ = (
+        Index("ix_translation_revision_passage", "passage_id"),
+        Index("ix_translation_revision_created_at", "created_at"),
+    )
+
+    revision_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("trv"))
+    passage_id: Mapped[str] = mapped_column(ForeignKey("passage_evidence.passage_id"), nullable=False)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_variant: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    translated_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_language_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    detected_language_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    untranslated_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    quality_decision: Mapped[str] = mapped_column(String(40), nullable=False)
+    provenance_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    translation_trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class JobAttempt(Base, TimestampedMixin, OperatorMixin):

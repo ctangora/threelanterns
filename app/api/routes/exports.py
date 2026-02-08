@@ -47,6 +47,13 @@ def export_passages(
                 "source_span_locator": row.source_span_locator,
                 "original_language": row.original_language,
                 "normalized_language": row.normalized_language,
+                "detected_language_code": row.detected_language_code or "",
+                "detected_language_label": row.detected_language_label or "",
+                "untranslated_ratio": str(row.untranslated_ratio),
+                "translation_status": row.translation_status.value
+                if hasattr(row.translation_status, "value")
+                else str(row.translation_status),
+                "needs_reprocess": str(bool(row.needs_reprocess)).lower(),
                 "extraction_confidence": str(row.extraction_confidence),
                 "reviewer_state": row.reviewer_state.value,
                 "publish_state": row.publish_state.value,

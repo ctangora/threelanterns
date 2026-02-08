@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.enums import PublishState, ReviewDecisionEnum, ReviewerState, ReviewableObjectType
@@ -61,6 +61,9 @@ def review_queue(
     state: str = ReviewerState.proposed.value,
     source_id: str | None = None,
     min_confidence: float | None = None,
+    needs_reprocess: bool | None = None,
+    max_untranslated_ratio: float | None = None,
+    detected_language: str | None = None,
     sort_by: str = "created_at",
     sort_dir: str = "asc",
 ) -> dict[str, Any]:
@@ -83,6 +86,14 @@ def review_queue(
             raise ValidationError("min_confidence must be within [0.0, 1.0]")
     if source_id and source_column is None:
         raise ValidationError(f"source_id filter is not supported for object_type={object_type}")
+    if needs_reprocess is not None and model is not PassageEvidence:
+        raise ValidationError(f"needs_reprocess filter is not supported for object_type={object_type}")
+    if max_untranslated_ratio is not None and model is not PassageEvidence:
+        raise ValidationError(f"max_untranslated_ratio is not supported for object_type={object_type}")
+    if detected_language and model is not PassageEvidence:
+        raise ValidationError(f"detected_language filter is not supported for object_type={object_type}")
+    if max_untranslated_ratio is not None and not (0.0 <= max_untranslated_ratio <= 1.0):
+        raise ValidationError("max_untranslated_ratio must be within [0.0, 1.0]")
 
     if sort_by not in {"created_at", "confidence"}:
         raise ValidationError(f"Unsupported sort_by: {sort_by}")
@@ -96,6 +107,18 @@ def review_queue(
         where_clauses.append(source_column == source_id)
     if min_confidence is not None and confidence_column is not None:
         where_clauses.append(confidence_column >= min_confidence)
+    if needs_reprocess is not None and model is PassageEvidence:
+        where_clauses.append(model.needs_reprocess == needs_reprocess)
+    if max_untranslated_ratio is not None and model is PassageEvidence:
+        where_clauses.append(model.untranslated_ratio <= max_untranslated_ratio)
+    if detected_language and model is PassageEvidence:
+        compact = detected_language.strip()
+        where_clauses.append(
+            or_(
+                model.detected_language_code == compact,
+                model.detected_language_label == compact,
+            )
+        )
 
     total_stmt = select(func.count()).select_from(model).where(*where_clauses)
     total = db.scalar(total_stmt) or 0
@@ -129,6 +152,9 @@ def review_queue(
         "state": requested_state.value,
         "source_id": source_id,
         "min_confidence": min_confidence,
+        "needs_reprocess": needs_reprocess,
+        "max_untranslated_ratio": max_untranslated_ratio,
+        "detected_language": detected_language,
         "sort_by": sort_by,
         "sort_dir": sort_dir,
     }
@@ -261,6 +287,8 @@ def review_metrics(db: Session) -> dict[str, Any]:
         for created_at in proposed_rows:
             if created_at is None:
                 continue
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
             age_hours = (now - created_at).total_seconds() / 3600.0
             proposed_ages_hours.append(max(age_hours, 0.0))
 
