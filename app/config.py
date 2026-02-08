@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     max_job_attempts: int = Field(default=3, alias="MAX_JOB_ATTEMPTS")
     max_source_chars: int = Field(default=250000, alias="MAX_SOURCE_CHARS")
     max_passages_per_source: int = Field(default=25, alias="MAX_PASSAGES_PER_SOURCE")
+    max_register_fingerprint_chars: int = Field(default=120000, alias="MAX_REGISTER_FINGERPRINT_CHARS")
+    parser_timeout_seconds: int = Field(default=30, alias="PARSER_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def validate_required_runtime(self) -> "Settings":
@@ -44,6 +46,10 @@ class Settings(BaseSettings):
             raise ValueError("MAX_SOURCE_CHARS must be >= 2000")
         if self.max_passages_per_source < 1:
             raise ValueError("MAX_PASSAGES_PER_SOURCE must be >= 1")
+        if self.max_register_fingerprint_chars < 2000:
+            raise ValueError("MAX_REGISTER_FINGERPRINT_CHARS must be >= 2000")
+        if self.parser_timeout_seconds < 1:
+            raise ValueError("PARSER_TIMEOUT_SECONDS must be >= 1")
         return self
 
 

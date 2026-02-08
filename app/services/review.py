@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -35,6 +35,22 @@ def _to_json_safe(value: Any) -> Any:
     return value
 
 
+def _confidence_column_for_model(model):
+    if model is PassageEvidence:
+        return model.extraction_confidence
+    if model is RitualPatternTag:
+        return model.confidence
+    if model is CommonalityLink:
+        return model.weighted_similarity_score
+    return None
+
+
+def _source_column_for_model(model):
+    if model is PassageEvidence:
+        return model.source_id
+    return None
+
+
 def review_queue(
     db: Session,
     object_type: str,
@@ -42,20 +58,60 @@ def review_queue(
     page: int = 1,
     page_size: int = 50,
     max_page_size: int = 200,
+    state: str = ReviewerState.proposed.value,
+    source_id: str | None = None,
+    min_confidence: float | None = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "asc",
 ) -> dict[str, Any]:
     model, id_field, state_field = get_review_model(object_type)
     state_column = getattr(model, state_field)
     page = max(page, 1)
     page_size = max(1, min(page_size, max_page_size))
     offset = (page - 1) * page_size
+    try:
+        requested_state = ReviewerState(state)
+    except ValueError as exc:
+        raise ValidationError(f"Invalid review state filter: {state}") from exc
 
-    total_stmt = select(func.count()).select_from(model).where(state_column == ReviewerState.proposed)
+    confidence_column = _confidence_column_for_model(model)
+    source_column = _source_column_for_model(model)
+    if min_confidence is not None:
+        if confidence_column is None:
+            raise ValidationError(f"min_confidence is not supported for object_type={object_type}")
+        if not (0.0 <= min_confidence <= 1.0):
+            raise ValidationError("min_confidence must be within [0.0, 1.0]")
+    if source_id and source_column is None:
+        raise ValidationError(f"source_id filter is not supported for object_type={object_type}")
+
+    if sort_by not in {"created_at", "confidence"}:
+        raise ValidationError(f"Unsupported sort_by: {sort_by}")
+    if sort_dir not in {"asc", "desc"}:
+        raise ValidationError(f"Unsupported sort_dir: {sort_dir}")
+    if sort_by == "confidence" and confidence_column is None:
+        raise ValidationError(f"sort_by=confidence is not supported for object_type={object_type}")
+
+    where_clauses = [state_column == requested_state]
+    if source_id and source_column is not None:
+        where_clauses.append(source_column == source_id)
+    if min_confidence is not None and confidence_column is not None:
+        where_clauses.append(confidence_column >= min_confidence)
+
+    total_stmt = select(func.count()).select_from(model).where(*where_clauses)
     total = db.scalar(total_stmt) or 0
+
+    if sort_by == "created_at":
+        order_column = model.created_at
+    else:
+        order_column = confidence_column
+    if order_column is None:
+        raise ValidationError(f"Unable to resolve sort column for object_type={object_type}")
+    sort_expression = order_column.asc() if sort_dir == "asc" else order_column.desc()
 
     stmt = (
         select(model)
-        .where(state_column == ReviewerState.proposed)
-        .order_by(model.created_at.asc())
+        .where(*where_clauses)
+        .order_by(sort_expression, model.created_at.asc())
         .offset(offset)
         .limit(page_size)
     )
@@ -70,6 +126,11 @@ def review_queue(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "state": requested_state.value,
+        "source_id": source_id,
+        "min_confidence": min_confidence,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
     }
 
 
@@ -134,3 +195,86 @@ def apply_review_decision(
         metadata_blob={"decision": decision.value, "notes": notes},
     )
     return review
+
+
+def apply_bulk_review(
+    db: Session,
+    *,
+    object_type: str,
+    object_ids: list[str],
+    decision: ReviewDecisionEnum,
+    notes: str | None,
+    actor: str,
+    correlation_id: str,
+) -> list[ReviewDecision]:
+    validate_review_input(decision, notes)
+    deduped_ids: list[str] = []
+    seen: set[str] = set()
+    for object_id in object_ids:
+        compact = object_id.strip()
+        if not compact or compact in seen:
+            continue
+        seen.add(compact)
+        deduped_ids.append(compact)
+    if not deduped_ids:
+        raise ValidationError("At least one object_id is required for bulk review")
+
+    reviews: list[ReviewDecision] = []
+    for object_id in deduped_ids:
+        review = apply_review_decision(
+            db,
+            object_type=object_type,
+            object_id=object_id,
+            decision=decision,
+            notes=notes,
+            actor=actor,
+            correlation_id=f"{correlation_id}:{object_id}",
+        )
+        reviews.append(review)
+    return reviews
+
+
+def review_metrics(db: Session) -> dict[str, Any]:
+    object_types = ["passage", "tag", "link", "flag"]
+    backlog: dict[str, dict[str, int]] = {}
+    now = datetime.now(UTC)
+    proposed_ages_hours: list[float] = []
+
+    for object_type in object_types:
+        model, _, state_field = get_review_model(object_type)
+        state_column = getattr(model, state_field)
+
+        counts_stmt = select(state_column, func.count()).group_by(state_column)
+        rows = db.execute(counts_stmt).all()
+        state_counts = {
+            ReviewerState.proposed.value: 0,
+            ReviewerState.approved.value: 0,
+            ReviewerState.rejected.value: 0,
+            ReviewerState.needs_revision.value: 0,
+        }
+        for state, count in rows:
+            state_value = state.value if isinstance(state, ReviewerState) else str(state)
+            state_counts[state_value] = int(count)
+        backlog[object_type] = state_counts
+
+        proposed_rows = db.scalars(select(model.created_at).where(state_column == ReviewerState.proposed)).all()
+        for created_at in proposed_rows:
+            if created_at is None:
+                continue
+            age_hours = (now - created_at).total_seconds() / 3600.0
+            proposed_ages_hours.append(max(age_hours, 0.0))
+
+    decisions_24h_stmt = select(func.count()).select_from(ReviewDecision).where(
+        ReviewDecision.decision_timestamp >= now - timedelta(hours=24)
+    )
+    decisions_24h = int(db.scalar(decisions_24h_stmt) or 0)
+
+    average_proposed_age_hours = (
+        round(sum(proposed_ages_hours) / len(proposed_ages_hours), 4) if proposed_ages_hours else 0.0
+    )
+    return {
+        "generated_at": now,
+        "backlog": backlog,
+        "decisions_24h": decisions_24h,
+        "average_proposed_age_hours": average_proposed_age_hours,
+    }

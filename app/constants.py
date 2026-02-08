@@ -1,4 +1,4 @@
-ALLOWED_SOURCE_EXTENSIONS = {".txt", ".md", ".html", ".epub", ".gz"}
+ALLOWED_SOURCE_EXTENSIONS = {".txt", ".md", ".html", ".epub", ".gz", ".pdf", ".docx", ".rtf"}
 
 REGION_VOCABULARY = {
     "africa_nile",
@@ -141,4 +141,3 @@ FLAG_TYPES = {
 COMMONALITY_RELATION_TYPES = {"isVersionOf", "isRelatedTo", "sharesPatternWith", "isDerivativeOf"}
 
 LANGUAGE_NORMALIZED_CANONICAL = "eng"
-

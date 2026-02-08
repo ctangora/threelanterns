@@ -47,6 +47,33 @@ class RegisterRequest(BaseModel):
 class RegisterResponse(BaseModel):
     text_id: str
     source_id: str
+    registration_status: str = "created"
+    duplicate_of_source_id: str | None = None
+    witness_group_id: str | None = None
+
+
+class BatchRegisterRequest(BaseModel):
+    items: list[RegisterRequest]
+    continue_on_error: bool = True
+
+
+class BatchRegisterResult(BaseModel):
+    source_path: str
+    status: str
+    text_id: str | None = None
+    source_id: str | None = None
+    duplicate_of_source_id: str | None = None
+    witness_group_id: str | None = None
+    error: str | None = None
+
+
+class BatchRegisterResponse(BaseModel):
+    total: int
+    created: int
+    exact_duplicates: int
+    alternate_witnesses: int
+    failed: int
+    results: list[BatchRegisterResult]
 
 
 class CreateIngestJobRequest(BaseModel):
@@ -84,6 +111,28 @@ class ReviewResponse(BaseModel):
     new_state: str
 
 
+class BulkReviewRequest(BaseModel):
+    object_type: str
+    object_ids: list[str] = Field(min_length=1)
+    decision: ReviewDecisionEnum
+    notes: str | None = None
+
+
+class BulkReviewResponse(BaseModel):
+    object_type: str
+    decision: str
+    requested: int
+    processed: int
+    review_ids: list[str]
+
+
+class ReviewMetricsResponse(BaseModel):
+    generated_at: datetime
+    backlog: dict[str, dict[str, int]]
+    decisions_24h: int
+    average_proposed_age_hours: float
+
+
 class RecordResponse(BaseModel):
     object_type: str
     object_id: str
@@ -99,3 +148,25 @@ class AuditResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     timestamp: datetime
+
+
+class HealthDetailsResponse(BaseModel):
+    status: Literal["ok"]
+    timestamp: datetime
+    database_ok: bool
+    queue_depth: dict[str, int]
+    dead_letter_jobs: int
+    worker_last_activity_at: datetime | None = None
+
+
+class SearchHit(BaseModel):
+    object_type: str
+    object_id: str
+    score: float
+    snippet: str
+    review_state: str | None = None
+
+
+class SearchResponse(BaseModel):
+    total: int
+    hits: list[SearchHit]

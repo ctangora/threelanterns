@@ -3,18 +3,64 @@
 <h2>{{ title }}</h2>
 <p>Total in queue: {{ total }}</p>
 <p>Showing page {{ page }} (page size {{ page_size }}) with {{ items|length }} item(s).</p>
+<form method="get" action="{{ base_path }}" class="card">
+  <label>State
+    <select name="state">
+      <option value="proposed" {% if state == "proposed" %}selected{% endif %}>proposed</option>
+      <option value="approved" {% if state == "approved" %}selected{% endif %}>approved</option>
+      <option value="rejected" {% if state == "rejected" %}selected{% endif %}>rejected</option>
+      <option value="needs_revision" {% if state == "needs_revision" %}selected{% endif %}>needs_revision</option>
+    </select>
+  </label>
+  <label>Source ID (passage queue only)
+    <input type="text" name="source_id" value="{{ source_id or '' }}" />
+  </label>
+  <label>Min confidence
+    <input type="number" min="0" max="1" step="0.01" name="min_confidence" value="{{ min_confidence if min_confidence is not none else '' }}" />
+  </label>
+  <label>Sort by
+    <select name="sort_by">
+      <option value="created_at" {% if sort_by == "created_at" %}selected{% endif %}>created_at</option>
+      <option value="confidence" {% if sort_by == "confidence" %}selected{% endif %}>confidence</option>
+    </select>
+  </label>
+  <label>Sort direction
+    <select name="sort_dir">
+      <option value="asc" {% if sort_dir == "asc" %}selected{% endif %}>asc</option>
+      <option value="desc" {% if sort_dir == "desc" %}selected{% endif %}>desc</option>
+    </select>
+  </label>
+  <label>Page size
+    <input type="number" min="1" max="200" name="page_size" value="{{ page_size }}" />
+  </label>
+  <button type="submit">Apply Filters</button>
+</form>
 <p>
   {% if has_prev %}
-  <a href="{{ base_path }}?page={{ prev_page }}&page_size={{ page_size }}">Previous</a>
+  <a href="{{ base_path }}?{{ prev_query }}">Previous</a>
   {% endif %}
   {% if has_prev and has_next %} | {% endif %}
   {% if has_next %}
-  <a href="{{ base_path }}?page={{ next_page }}&page_size={{ page_size }}">Next</a>
+  <a href="{{ base_path }}?{{ next_query }}">Next</a>
   {% endif %}
 </p>
+<form id="bulk-review-form" method="post" action="/review/{{ kind }}/bulk" class="card">
+  <label>Bulk decision
+    <select name="decision">
+      <option value="approve">approve</option>
+      <option value="reject">reject</option>
+      <option value="needs_revision">needs_revision</option>
+    </select>
+  </label>
+  <label>Bulk notes
+    <input name="notes" type="text" placeholder="Required for reject/needs_revision" />
+  </label>
+  <button type="submit">Submit Bulk Review</button>
+</form>
 {% for item in items %}
 <section class="card">
   <h3><a href="/records/{{ item.object_id }}">{{ item.object_id }}</a></h3>
+  <label><input type="checkbox" form="bulk-review-form" name="object_ids" value="{{ item.object_id }}" /> Select for bulk</label>
   <pre>{{ item.payload_pretty }}</pre>
   <form method="post" action="/review/{{ kind }}/{{ item.object_id }}">
     <label>Decision

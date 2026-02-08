@@ -46,7 +46,12 @@ def test_t03_invalid_vocabulary_routes_pending_queue(db_session, tmp_path):
     ok = _store_tag_or_pending(
         db_session,
         evidence=passage,
-        proposal=TagProposal(ontology_dimension="ritual_intent", controlled_term="not_allowed_term", confidence=0.7),
+        proposal=TagProposal(
+            ontology_dimension="ritual_intent",
+            controlled_term="not_allowed_term",
+            confidence=0.7,
+            evidence_ids=[passage.passage_id],
+        ),
         actor="test-operator",
     )
     db_session.commit()
@@ -113,7 +118,12 @@ def test_t06_flag_requires_rationale_and_evidence(db_session, tmp_path):
         _store_flag(
             db_session,
             evidence=passage,
-            proposal=FlagProposal(flag_type="uncertain_translation", severity="low", rationale=""),
+            proposal=FlagProposal(
+                flag_type="uncertain_translation",
+                severity="low",
+                rationale="",
+                evidence_ids=[passage.passage_id],
+            ),
             actor="test-operator",
         )
     except ValidationError:
@@ -242,4 +252,3 @@ def test_m2_end_to_end_ingest_and_review_cycle(client, db_session, tmp_path):
     flags = list(db_session.scalars(select(FlagRecord)))
     assert isinstance(links, list)
     assert isinstance(flags, list)
-

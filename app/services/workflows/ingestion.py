@@ -11,8 +11,8 @@ from app.services.ai.proposals import propose_for_passage
 from app.services.artifacts import artifact_exists, store_text_artifact
 from app.services.audit import emit_audit_event
 from app.services.extraction import build_passage_evidence
-from app.services.parsers import parse_source_file
-from app.services.utils import now_utc
+from app.services.parsers import parse_source_file_with_metadata
+from app.services.utils import normalize_to_english, now_utc, sha256_file, sha256_text
 from app.services.validation import ValidationError, require
 
 
@@ -96,6 +96,19 @@ def _record_attempt(db: Session, *, job: IngestionJob, status: JobStatus, actor:
     return attempt
 
 
+def _classify_job_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "source file missing" in message:
+        return "source_missing"
+    if "unsupported extension" in message:
+        return "unsupported_extension"
+    if "no extractable" in message:
+        return "parse_no_text"
+    if "openai" in message or "proposal" in message:
+        return "proposal_failure"
+    return "job_processing_error"
+
+
 def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: str) -> None:
     source = db.get(SourceMaterialRecord, job.source_id)
     if source is None:
@@ -106,10 +119,19 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         job.attempt_count += 1
         source_path = Path(source.source_path)
         require(source_path.exists(), f"Source file missing: {source_path}")
+        if not source.source_sha256:
+            source.source_sha256 = sha256_file(source_path)
 
-        raw_text = parse_source_file(source_path)
+        parse_result = parse_source_file_with_metadata(source_path)
+        raw_text = parse_result["text"]
         if len(raw_text) > settings.max_source_chars:
             raw_text = raw_text[: settings.max_source_chars]
+        source.normalized_text_sha256 = sha256_text(
+            normalize_to_english(raw_text)[: settings.max_register_fingerprint_chars]
+        )
+        source.witness_group_id = source.witness_group_id or source.source_id
+        job.parser_name = parse_result["parser_name"]
+        job.parser_version = parse_result["parser_version"]
         if not artifact_exists(db, source_id=source.source_id, artifact_type="raw_text"):
             store_text_artifact(db, source_id=source.source_id, artifact_type="raw_text", text=raw_text, actor=actor)
 
@@ -139,6 +161,8 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         previous = job.status.value
         job.status = JobStatus.completed
         job.last_error = None
+        job.error_code = None
+        job.error_context_json = {}
         job.updated_by = actor
         _record_attempt(db, job=job, status=JobStatus.completed, actor=actor)
 
@@ -163,6 +187,14 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         error_message = f"{exc.__class__.__name__}: {exc}"
         stack = traceback.format_exc()
         job.last_error = f"{error_message}\n{stack}"
+        job.error_code = _classify_job_error(exc)
+        job.error_context_json = {
+            "exception_type": exc.__class__.__name__,
+            "message": str(exc),
+            "source_id": source.source_id,
+            "source_path": source.source_path,
+            "attempt_count": job.attempt_count,
+        }
         job.updated_by = actor
 
         if job.attempt_count >= job.max_attempts:
@@ -180,7 +212,7 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
             correlation_id=correlation_id,
             previous_state=previous,
             new_state=job.status.value,
-            metadata_blob={"error": error_message},
+            metadata_blob={"error": error_message, "error_code": job.error_code},
         )
 
 

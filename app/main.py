@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.routes import audit, health, intake, jobs, records, review
+from app.api.routes import audit, exports, health, intake, jobs, records, review, search
 from app.config import get_settings
 from app.database import SessionLocal
 from app.web.routes import router as web_router
@@ -34,6 +34,8 @@ def create_app() -> FastAPI:
     app.include_router(intake.router)
     app.include_router(jobs.router)
     app.include_router(review.router)
+    app.include_router(search.router)
+    app.include_router(exports.router)
     app.include_router(records.router)
     app.include_router(audit.router)
     app.include_router(web_router)
@@ -52,4 +54,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

@@ -53,7 +53,12 @@ class TextRecord(Base, TimestampedMixin, OperatorMixin):
 
 class SourceMaterialRecord(Base, TimestampedMixin, OperatorMixin):
     __tablename__ = "source_material_records"
-    __table_args__ = (Index("ix_source_text_id", "text_id"),)
+    __table_args__ = (
+        Index("ix_source_text_id", "text_id"),
+        Index("ix_source_sha256", "source_sha256"),
+        Index("ix_source_normalized_sha256", "normalized_text_sha256"),
+        Index("ix_source_witness_group", "witness_group_id"),
+    )
 
     source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("src"))
     text_id: Mapped[str] = mapped_column(ForeignKey("text_records.text_id"), nullable=False)
@@ -67,6 +72,10 @@ class SourceMaterialRecord(Base, TimestampedMixin, OperatorMixin):
     rights_evidence: Mapped[str] = mapped_column(Text, nullable=False)
     source_provenance_note: Mapped[str] = mapped_column(Text, nullable=False)
     source_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalized_text_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    witness_group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_duplicate_of_source_id: Mapped[str | None] = mapped_column(ForeignKey("source_material_records.source_id"), nullable=True)
 
     text: Mapped["TextRecord"] = relationship(back_populates="sources")
     passages: Mapped[list["PassageEvidence"]] = relationship(back_populates="source")
@@ -78,6 +87,9 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
     __table_args__ = (
         Index("ix_passage_text_id", "text_id"),
         Index("ix_passage_source_id", "source_id"),
+        Index("ix_passage_reviewer_state", "reviewer_state"),
+        Index("ix_passage_extraction_confidence", "extraction_confidence"),
+        Index("ix_passage_created_at", "created_at"),
     )
 
     passage_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("psg"))
@@ -98,7 +110,11 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
 
 class RitualPatternTag(Base, TimestampedMixin, OperatorMixin):
     __tablename__ = "ritual_pattern_tags"
-    __table_args__ = (Index("ix_tag_reviewer_state", "reviewer_state"),)
+    __table_args__ = (
+        Index("ix_tag_reviewer_state", "reviewer_state"),
+        Index("ix_tag_confidence", "confidence"),
+        Index("ix_tag_created_at", "created_at"),
+    )
 
     tag_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("tag"))
     ontology_dimension: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -112,7 +128,11 @@ class RitualPatternTag(Base, TimestampedMixin, OperatorMixin):
 
 class CommonalityLink(Base, TimestampedMixin, OperatorMixin):
     __tablename__ = "commonality_links"
-    __table_args__ = (Index("ix_link_reviewer_decision", "reviewer_decision"),)
+    __table_args__ = (
+        Index("ix_link_reviewer_decision", "reviewer_decision"),
+        Index("ix_link_weighted_similarity_score", "weighted_similarity_score"),
+        Index("ix_link_created_at", "created_at"),
+    )
 
     link_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("lnk"))
     source_entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -130,7 +150,10 @@ class CommonalityLink(Base, TimestampedMixin, OperatorMixin):
 
 class FlagRecord(Base, TimestampedMixin, OperatorMixin):
     __tablename__ = "flag_records"
-    __table_args__ = (Index("ix_flag_reviewer_state", "reviewer_state"),)
+    __table_args__ = (
+        Index("ix_flag_reviewer_state", "reviewer_state"),
+        Index("ix_flag_created_at", "created_at"),
+    )
 
     flag_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("flg"))
     object_type: Mapped[SourceObjectType] = mapped_column(Enum(SourceObjectType), nullable=False)
@@ -162,6 +185,8 @@ class IngestionJob(Base, TimestampedMixin, OperatorMixin):
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_ingestion_jobs_idempotency_key"),
         Index("ix_ingestion_jobs_status", "status"),
+        Index("ix_ingestion_jobs_created_at", "created_at"),
+        Index("ix_ingestion_jobs_source_id", "source_id"),
     )
 
     job_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("job"))
@@ -171,6 +196,10 @@ class IngestionJob(Base, TimestampedMixin, OperatorMixin):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_context_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    parser_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="jobs")
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
@@ -217,7 +246,10 @@ class ProposalTrace(Base, TimestampedMixin, OperatorMixin):
     prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
     prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     response_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_response_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     usage_blob: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class VocabularyPendingTerm(Base, TimestampedMixin, OperatorMixin):
@@ -245,4 +277,3 @@ class AuditEvent(Base):
     correlation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     metadata_blob: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Review Metrics</h2>
+<p>Generated at: {{ metrics.generated_at }}</p>
+<p>Decisions in last 24h: {{ metrics.decisions_24h }}</p>
+<p>Average proposed queue age (hours): {{ metrics.average_proposed_age_hours }}</p>
+<table>
+  <thead>
+    <tr>
+      <th>Object Type</th>
+      <th>Proposed</th>
+      <th>Approved</th>
+      <th>Rejected</th>
+      <th>Needs Revision</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for object_type, states in metrics.backlog.items() %}
+    <tr>
+      <td>{{ object_type }}</td>
+      <td>{{ states.proposed }}</td>
+      <td>{{ states.approved }}</td>
+      <td>{{ states.rejected }}</td>
+      <td>{{ states.needs_revision }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

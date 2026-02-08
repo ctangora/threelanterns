@@ -40,7 +40,7 @@ def test_m2_discover_returns_supported_types_only(client):
     assert response.status_code == 200
     body = response.json()
     assert body["count"] == 25
-    assert all(file["extension"] in {".txt", ".md", ".html", ".epub", ".gz"} for file in body["files"])
+    assert all(file["extension"] in {".txt", ".md", ".html", ".epub", ".gz", ".pdf", ".docx", ".rtf"} for file in body["files"])
 
 
 def test_m2_job_idempotency(client, tmp_path):
