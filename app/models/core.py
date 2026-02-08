@@ -359,6 +359,61 @@ class AuditEvent(Base):
     metadata_blob: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class WitnessGroup(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "witness_groups"
+    __table_args__ = (
+        Index("ix_witness_groups_status", "group_status"),
+        Index("ix_witness_groups_text", "canonical_text_id"),
+    )
+
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("wgr"))
+    canonical_text_id: Mapped[str | None] = mapped_column(ForeignKey("text_records.text_id"), nullable=True)
+    group_status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
+    match_method: Mapped[str] = mapped_column(String(20), default="exact_hash", nullable=False)
+    match_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+
+class WitnessGroupMember(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "witness_group_members"
+    __table_args__ = (
+        Index("ix_witness_group_members_source", "source_id"),
+    )
+
+    group_id: Mapped[str] = mapped_column(ForeignKey("witness_groups.group_id"), primary_key=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("source_material_records.source_id"), primary_key=True)
+    member_role: Mapped[str] = mapped_column(String(20), default="secondary", nullable=False)
+    parser_strategy: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    membership_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class ConsolidatedPassage(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "consolidated_passages"
+    __table_args__ = (
+        Index("ix_consolidated_passages_group", "group_id"),
+        Index("ix_consolidated_passages_hash", "passage_hash"),
+    )
+
+    consolidated_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("cps"))
+    group_id: Mapped[str] = mapped_column(ForeignKey("witness_groups.group_id"), nullable=False)
+    excerpt_merged: Mapped[str] = mapped_column(Text, nullable=False)
+    passage_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    usability_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_state: Mapped[str] = mapped_column(String(30), default="accepted", nullable=False)
+
+
+class ConsolidatedPassageSource(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "consolidated_passage_sources"
+    __table_args__ = (
+        Index("ix_consolidated_sources_source", "source_id"),
+    )
+
+    consolidated_id: Mapped[str] = mapped_column(ForeignKey("consolidated_passages.consolidated_id"), primary_key=True)
+    passage_id: Mapped[str] = mapped_column(ForeignKey("passage_evidence.passage_id"), primary_key=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("source_material_records.source_id"), nullable=False)
+    similarity_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+
 class TuningProfile(Base, TimestampedMixin, OperatorMixin):
     __tablename__ = "tuning_profiles"
     __table_args__ = (

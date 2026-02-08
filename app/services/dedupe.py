@@ -13,6 +13,7 @@ from app.services.utils import normalize_to_english, sha256_file, sha256_text
 class DedupeFingerprint:
     source_sha256: str
     normalized_text_sha256: str
+    normalized_text: str
 
 
 @dataclass
@@ -28,7 +29,11 @@ def build_source_fingerprint(source_path: Path, *, max_chars: int) -> DedupeFing
     if max_chars > 0:
         normalized = normalized[:max_chars]
     normalized_hash = sha256_text(normalized)
-    return DedupeFingerprint(source_sha256=source_hash, normalized_text_sha256=normalized_hash)
+    return DedupeFingerprint(
+        source_sha256=source_hash,
+        normalized_text_sha256=normalized_hash,
+        normalized_text=normalized,
+    )
 
 
 def resolve_duplicate_source(

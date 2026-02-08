@@ -149,6 +149,78 @@ def ensure_runtime_schema(engine: Engine) -> None:
 
     _create_table_if_missing(
         engine,
+        "witness_groups",
+        """
+        CREATE TABLE witness_groups (
+          group_id VARCHAR(32) PRIMARY KEY,
+          canonical_text_id VARCHAR(32) REFERENCES text_records(text_id),
+          group_status VARCHAR(20) NOT NULL DEFAULT 'active',
+          match_method VARCHAR(20) NOT NULL DEFAULT 'exact_hash',
+          match_score REAL NOT NULL DEFAULT 1.0,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL
+        )
+        """,
+    )
+    _create_table_if_missing(
+        engine,
+        "witness_group_members",
+        """
+        CREATE TABLE witness_group_members (
+          group_id VARCHAR(32) NOT NULL REFERENCES witness_groups(group_id),
+          source_id VARCHAR(32) NOT NULL REFERENCES source_material_records(source_id),
+          member_role VARCHAR(20) NOT NULL DEFAULT 'secondary',
+          parser_strategy VARCHAR(80),
+          membership_reason TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL,
+          PRIMARY KEY (group_id, source_id)
+        )
+        """,
+    )
+    _create_table_if_missing(
+        engine,
+        "consolidated_passages",
+        """
+        CREATE TABLE consolidated_passages (
+          consolidated_id VARCHAR(32) PRIMARY KEY,
+          group_id VARCHAR(32) NOT NULL REFERENCES witness_groups(group_id),
+          excerpt_merged TEXT NOT NULL,
+          passage_hash VARCHAR(64) NOT NULL,
+          usability_score REAL NOT NULL DEFAULT 0,
+          relevance_score REAL NOT NULL DEFAULT 0,
+          relevance_state VARCHAR(30) NOT NULL DEFAULT 'accepted',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL
+        )
+        """,
+    )
+    _create_table_if_missing(
+        engine,
+        "consolidated_passage_sources",
+        """
+        CREATE TABLE consolidated_passage_sources (
+          consolidated_id VARCHAR(32) NOT NULL REFERENCES consolidated_passages(consolidated_id),
+          passage_id VARCHAR(32) NOT NULL REFERENCES passage_evidence(passage_id),
+          source_id VARCHAR(32) NOT NULL REFERENCES source_material_records(source_id),
+          similarity_score REAL NOT NULL DEFAULT 1.0,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL,
+          PRIMARY KEY (consolidated_id, passage_id)
+        )
+        """,
+    )
+
+    _create_table_if_missing(
+        engine,
         "passage_reprocess_jobs",
         """
         CREATE TABLE passage_reprocess_jobs (
@@ -236,3 +308,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_tuning_runs_status", "tuning_runs", "status")
     _create_index_if_missing(engine, "ix_tuning_run_passages_run", "tuning_run_passages", "run_id")
     _create_index_if_missing(engine, "ix_tuning_run_passages_ordinal", "tuning_run_passages", "run_id, ordinal")
+    _create_index_if_missing(engine, "ix_witness_groups_status", "witness_groups", "group_status")
+    _create_index_if_missing(engine, "ix_witness_groups_text", "witness_groups", "canonical_text_id")
+    _create_index_if_missing(engine, "ix_witness_group_members_source", "witness_group_members", "source_id")
+    _create_index_if_missing(engine, "ix_consolidated_passages_group", "consolidated_passages", "group_id")
+    _create_index_if_missing(engine, "ix_consolidated_passages_hash", "consolidated_passages", "passage_hash")
+    _create_index_if_missing(engine, "ix_consolidated_sources_source", "consolidated_passage_sources", "source_id")

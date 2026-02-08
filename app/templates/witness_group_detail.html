@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Witness Group {{ group.group_id }}</h2>
+
+<section class="card">
+  <p>Status: {{ group.group_status }} | Method: {{ group.match_method }} | Score: {{ group.match_score }}</p>
+  <p>Canonical text: {{ group.canonical_text_id or "none" }}</p>
+  <form method="post" action="/witness-groups/{{ group.group_id }}/recompute">
+    <button type="submit">Re-run consolidation</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Members</h3>
+  <ul>
+    {% for member in members %}
+      <li>
+        {{ member.source_id }} (role={{ member.member_role }}, parser={{ member.parser_strategy or "auto" }})
+        <small>{{ member.membership_reason }}</small>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Consolidated Passages (latest 200)</h3>
+  <p>Count: {{ consolidated|length }}</p>
+  {% for item in consolidated %}
+    <section class="card">
+      <p>relevance={{ item.relevance_score }} | usability={{ item.usability_score }} | state={{ item.relevance_state }}</p>
+      <pre>{{ item.excerpt_merged }}</pre>
+    </section>
+  {% endfor %}
+</section>
+{% endblock %}

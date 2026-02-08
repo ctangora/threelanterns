@@ -12,6 +12,14 @@ from app.models.core import SourceMaterialRecord, TextRecord
 from app.schemas import DiscoveredFile, RegisterRequest
 from app.services.audit import emit_audit_event
 from app.services.dedupe import build_source_fingerprint, resolve_duplicate_source
+from app.services.witness import (
+    FUZZY_MATCH_THRESHOLD,
+    FUZZY_REVIEW_THRESHOLD,
+    add_member,
+    ensure_group_for_source,
+    find_fuzzy_match,
+    update_group_status_for_parser,
+)
 from app.services.validation import require, validate_region, validate_traditions
 
 
@@ -107,6 +115,24 @@ def register_source_with_outcome(
     if existing:
         text = db.get(TextRecord, existing.text_id)
         require(text is not None, f"Source exists with missing text record: {existing.source_id}")
+        group = ensure_group_for_source(
+            db,
+            source=existing,
+            canonical_text_id=text.text_id,
+            actor=actor,
+            match_method="exact_hash",
+            match_score=1.0,
+            status="active",
+        )
+        add_member(
+            db,
+            group_id=group.group_id,
+            source_id=existing.source_id,
+            role="primary",
+            parser_strategy="auto_by_extension",
+            membership_reason="existing_source_path_match",
+            actor=actor,
+        )
         emit_audit_event(
             db,
             actor=actor,
@@ -123,7 +149,7 @@ def register_source_with_outcome(
             source=existing,
             registration_status="exact_duplicate",
             duplicate_of_source_id=existing.source_id,
-            witness_group_id=existing.witness_group_id,
+            witness_group_id=group.group_id,
         )
 
     fingerprint = build_source_fingerprint(
@@ -139,6 +165,24 @@ def register_source_with_outcome(
     if dedupe.status == "exact_duplicate" and dedupe.existing_source is not None:
         text = db.get(TextRecord, dedupe.existing_source.text_id)
         require(text is not None, f"Source exists with missing text record: {dedupe.existing_source.source_id}")
+        group = ensure_group_for_source(
+            db,
+            source=dedupe.existing_source,
+            canonical_text_id=text.text_id,
+            actor=actor,
+            match_method="exact_hash",
+            match_score=1.0,
+            status="active",
+        )
+        add_member(
+            db,
+            group_id=group.group_id,
+            source_id=dedupe.existing_source.source_id,
+            role="primary",
+            parser_strategy="auto_by_extension",
+            membership_reason="exact_hash_match",
+            actor=actor,
+        )
         emit_audit_event(
             db,
             actor=actor,
@@ -155,20 +199,28 @@ def register_source_with_outcome(
             source=dedupe.existing_source,
             registration_status="exact_duplicate",
             duplicate_of_source_id=dedupe.existing_source.source_id,
-            witness_group_id=dedupe.existing_source.witness_group_id,
+            witness_group_id=group.group_id,
         )
 
     if dedupe.status == "alternate_witness" and dedupe.existing_source is not None:
         text = db.get(TextRecord, dedupe.existing_source.text_id)
         require(text is not None, f"Source exists with missing text record: {dedupe.existing_source.source_id}")
-        witness_group_id = dedupe.existing_source.witness_group_id or dedupe.existing_source.source_id
+        group = ensure_group_for_source(
+            db,
+            source=dedupe.existing_source,
+            canonical_text_id=text.text_id,
+            actor=actor,
+            match_method="normalized_hash",
+            match_score=1.0,
+            status="active",
+        )
         source = _build_source_record(
             request=request,
             source_path=source_path,
             text_id=text.text_id,
             source_sha256=fingerprint.source_sha256,
             normalized_text_sha256=fingerprint.normalized_text_sha256,
-            witness_group_id=witness_group_id,
+            witness_group_id=group.group_id,
             is_duplicate_of_source_id=dedupe.existing_source.source_id,
             actor=actor,
         )
@@ -178,6 +230,15 @@ def register_source_with_outcome(
         text.source_count += 1
         text.updated_by = actor
         source.updated_by = actor
+        add_member(
+            db,
+            group_id=group.group_id,
+            source_id=source.source_id,
+            role="secondary",
+            parser_strategy="auto_by_extension",
+            membership_reason="normalized_hash_match",
+            actor=actor,
+        )
 
         emit_audit_event(
             db,
@@ -192,7 +253,7 @@ def register_source_with_outcome(
                 "source_path": str(source_path),
                 "duplicate_status": "alternate_witness",
                 "duplicate_of_source_id": dedupe.existing_source.source_id,
-                "witness_group_id": witness_group_id,
+                "witness_group_id": group.group_id,
             },
         )
         return RegisterOutcome(
@@ -200,7 +261,73 @@ def register_source_with_outcome(
             source=source,
             registration_status="alternate_witness",
             duplicate_of_source_id=dedupe.existing_source.source_id,
-            witness_group_id=witness_group_id,
+            witness_group_id=group.group_id,
+        )
+
+    fuzzy = find_fuzzy_match(
+        db,
+        normalized_text=fingerprint.normalized_text,
+        canonical_title=canonical_title,
+    )
+    if fuzzy is not None and fuzzy.score >= FUZZY_MATCH_THRESHOLD:
+        text = db.get(TextRecord, fuzzy.source.text_id)
+        require(text is not None, f"Source exists with missing text record: {fuzzy.source.source_id}")
+        group = ensure_group_for_source(
+            db,
+            source=fuzzy.source,
+            canonical_text_id=text.text_id,
+            actor=actor,
+            match_method="fuzzy",
+            match_score=fuzzy.score,
+            status="active",
+        )
+        source = _build_source_record(
+            request=request,
+            source_path=source_path,
+            text_id=text.text_id,
+            source_sha256=fingerprint.source_sha256,
+            normalized_text_sha256=fingerprint.normalized_text_sha256,
+            witness_group_id=group.group_id,
+            is_duplicate_of_source_id=fuzzy.source.source_id,
+            actor=actor,
+        )
+        db.add(source)
+        db.flush()
+        text.source_count += 1
+        text.updated_by = actor
+        source.updated_by = actor
+        add_member(
+            db,
+            group_id=group.group_id,
+            source_id=source.source_id,
+            role="secondary",
+            parser_strategy="auto_by_extension",
+            membership_reason=f"fuzzy_match:{fuzzy.score:.3f}",
+            actor=actor,
+        )
+        emit_audit_event(
+            db,
+            actor=actor,
+            action="register_source",
+            object_type="source",
+            object_id=source.source_id,
+            correlation_id=correlation_id,
+            previous_state=None,
+            new_state=source.digitization_status,
+            metadata_blob={
+                "source_path": str(source_path),
+                "duplicate_status": "fuzzy_match",
+                "duplicate_of_source_id": fuzzy.source.source_id,
+                "witness_group_id": group.group_id,
+                "match_score": fuzzy.score,
+            },
+        )
+        return RegisterOutcome(
+            text=text,
+            source=source,
+            registration_status="alternate_witness",
+            duplicate_of_source_id=fuzzy.source.source_id,
+            witness_group_id=group.group_id,
         )
 
     text = TextRecord(
@@ -234,7 +361,33 @@ def register_source_with_outcome(
     )
     db.add(source)
     db.flush()
-    source.witness_group_id = source.source_id
+    status = "active"
+    match_score = 1.0
+    match_method = "exact_hash"
+    if fuzzy is not None and fuzzy.score >= FUZZY_REVIEW_THRESHOLD:
+        status = "needs_review"
+        match_score = fuzzy.score
+        match_method = "fuzzy"
+    group = ensure_group_for_source(
+        db,
+        source=source,
+        canonical_text_id=text.text_id,
+        actor=actor,
+        match_method=match_method,
+        match_score=match_score,
+        status=status,
+    )
+    add_member(
+        db,
+        group_id=group.group_id,
+        source_id=source.source_id,
+        role="primary",
+        parser_strategy="auto_by_extension",
+        membership_reason=f"new_source{f' possible_fuzzy:{match_score:.3f}' if status == 'needs_review' else ''}",
+        actor=actor,
+    )
+    update_group_status_for_parser(db, group=group, parser_strategy="auto_by_extension", actor=actor)
+    source.witness_group_id = group.group_id
     source.updated_by = actor
     db.flush()
 
@@ -258,7 +411,13 @@ def register_source_with_outcome(
         correlation_id=correlation_id,
         previous_state=None,
         new_state=source.digitization_status,
-        metadata_blob={"source_path": str(source_path), "duplicate_status": "created", "witness_group_id": source.witness_group_id},
+        metadata_blob={
+            "source_path": str(source_path),
+            "duplicate_status": "created",
+            "witness_group_id": source.witness_group_id,
+            "match_method": match_method,
+            "match_score": match_score,
+        },
     )
     return RegisterOutcome(
         text=text,

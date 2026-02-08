@@ -15,6 +15,7 @@ from app.services.extraction import build_passage_evidence
 from app.services.parsers import parse_source_file_with_metadata
 from app.services.tuning import build_quality_config, get_segmentation_settings
 from app.services.utils import normalize_to_english, now_utc, sha256_file, sha256_text
+from app.services.witness import add_member, consolidate_group, ensure_group_for_source, update_group_status_for_parser
 from app.services.validation import ValidationError, require
 from app.services.workflows.reprocess import enqueue_reprocess_job, run_reprocess_cycle
 
@@ -136,12 +137,42 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         source.normalized_text_sha256 = sha256_text(
             normalize_to_english(raw_text)[: settings.max_register_fingerprint_chars]
         )
-        source.witness_group_id = source.witness_group_id or source.source_id
+        if not source.witness_group_id:
+            group = ensure_group_for_source(
+                db,
+                source=source,
+                canonical_text_id=source.text_id,
+                actor=actor,
+                match_method="exact_hash",
+                match_score=1.0,
+                status="active",
+            )
+            source.witness_group_id = group.group_id
+        else:
+            group = ensure_group_for_source(
+                db,
+                source=source,
+                canonical_text_id=source.text_id,
+                actor=actor,
+                match_method="exact_hash",
+                match_score=1.0,
+                status="active",
+            )
         job.parser_name = parse_result["parser_name"]
         job.parser_version = parse_result["parser_version"]
         job.parser_strategy = parse_result.get("parser_strategy") or parser_strategy
         if not artifact_exists(db, source_id=source.source_id, artifact_type="raw_text"):
             store_text_artifact(db, source_id=source.source_id, artifact_type="raw_text", text=raw_text, actor=actor)
+        add_member(
+            db,
+            group_id=group.group_id,
+            source_id=source.source_id,
+            role="primary",
+            parser_strategy=job.parser_strategy,
+            membership_reason="ingested",
+            actor=actor,
+        )
+        update_group_status_for_parser(db, group=group, parser_strategy=job.parser_strategy, actor=actor)
 
         quality_config = None
         min_passage_length = 180
@@ -277,6 +308,7 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
                 "skipped_filtered_passages": skipped_filtered_passages,
             },
         )
+        consolidate_group(db, group_id=group.group_id, actor=actor)
     except Exception as exc:
         previous = job.status.value
         error_message = f"{exc.__class__.__name__}: {exc}"
