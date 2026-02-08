@@ -26,17 +26,35 @@
       <option value="false" {% if needs_reprocess is sameas false %}selected{% endif %}>false</option>
     </select>
   </label>
-  <label>Max untranslated ratio
-    <input type="number" min="0" max="1" step="0.01" name="max_untranslated_ratio" value="{{ max_untranslated_ratio if max_untranslated_ratio is not none else '' }}" />
-  </label>
+  <fieldset class="card">
+    <legend>Quality</legend>
+    <label>Confidence (min)
+      <input type="number" min="0" max="1" step="0.01" name="min_confidence" value="{{ min_confidence if min_confidence is not none else '' }}" />
+    </label>
+    <label>Confidence (max)
+      <input type="number" min="0" max="1" step="0.01" name="max_confidence" value="{{ max_confidence if max_confidence is not none else '' }}" />
+    </label>
+    <label>Untranslated ratio (min)
+      <input type="number" min="0" max="1" step="0.01" name="min_untranslated_ratio" value="{{ min_untranslated_ratio if min_untranslated_ratio is not none else '' }}" />
+    </label>
+    <label>Untranslated ratio (max)
+      <input type="number" min="0" max="1" step="0.01" name="max_untranslated_ratio" value="{{ max_untranslated_ratio if max_untranslated_ratio is not none else '' }}" />
+    </label>
+    <label>Usability score (min)
+      <input type="number" min="0" max="1" step="0.01" name="min_usability" value="{{ min_usability if min_usability is not none else '' }}" />
+    </label>
+    <label>Usability score (max)
+      <input type="number" min="0" max="1" step="0.01" name="max_usability" value="{{ max_usability if max_usability is not none else '' }}" />
+    </label>
+    <label>Relevance score (min)
+      <input type="number" min="0" max="1" step="0.01" name="min_relevance" value="{{ min_relevance if min_relevance is not none else '' }}" />
+    </label>
+    <label>Relevance score (max)
+      <input type="number" min="0" max="1" step="0.01" name="max_relevance" value="{{ max_relevance if max_relevance is not none else '' }}" />
+    </label>
+  </fieldset>
   <label>Detected language
     <input type="text" name="detected_language" value="{{ detected_language or '' }}" placeholder="eng, Old English, lat..." />
-  </label>
-  <label>Min usability score
-    <input type="number" min="0" max="1" step="0.01" name="min_usability" value="{{ min_usability if min_usability is not none else '' }}" />
-  </label>
-  <label>Min relevance score
-    <input type="number" min="0" max="1" step="0.01" name="min_relevance" value="{{ min_relevance if min_relevance is not none else '' }}" />
   </label>
   <label>Relevance state
     <select name="relevance_state">
@@ -53,9 +71,14 @@
     </select>
   </label>
   {% endif %}
-  <label>Min confidence
+  {% if kind != "passage" %}
+  <label>Confidence (min)
     <input type="number" min="0" max="1" step="0.01" name="min_confidence" value="{{ min_confidence if min_confidence is not none else '' }}" />
   </label>
+  <label>Confidence (max)
+    <input type="number" min="0" max="1" step="0.01" name="max_confidence" value="{{ max_confidence if max_confidence is not none else '' }}" />
+  </label>
+  {% endif %}
   <label>Sort by
     <select name="sort_by">
       <option value="created_at" {% if sort_by == "created_at" %}selected{% endif %}>created_at</option>

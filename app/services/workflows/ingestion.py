@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.constants import PASSAGE_USABILITY_REPROCESS_THRESHOLD
 from app.enums import JobStatus, RelevanceState, ReprocessTriggerMode
-from app.models.core import IngestionJob, JobAttempt, PassageReprocessJob, SourceMaterialRecord
+from app.models.core import IngestionJob, JobAttempt, PassageEvidence, PassageReprocessJob, SourceMaterialRecord, TuningRun
 from app.services.ai.proposals import propose_for_passage
 from app.services.artifacts import artifact_exists, store_text_artifact
 from app.services.audit import emit_audit_event
 from app.services.extraction import build_passage_evidence
 from app.services.parsers import parse_source_file_with_metadata
+from app.services.tuning import build_quality_config, get_segmentation_settings
 from app.services.utils import normalize_to_english, now_utc, sha256_file, sha256_text
 from app.services.validation import ValidationError, require
 from app.services.workflows.reprocess import enqueue_reprocess_job, run_reprocess_cycle
@@ -124,7 +125,11 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         if not source.source_sha256:
             source.source_sha256 = sha256_file(source_path)
 
-        parse_result = parse_source_file_with_metadata(source_path)
+        tuning_run: TuningRun | None = None
+        if job.tuning_run_id:
+            tuning_run = db.get(TuningRun, job.tuning_run_id)
+        parser_strategy = job.parser_strategy or (tuning_run.parser_strategy if tuning_run else None)
+        parse_result = parse_source_file_with_metadata(source_path, parser_strategy=parser_strategy)
         raw_text = parse_result["text"]
         if len(raw_text) > settings.max_source_chars:
             raw_text = raw_text[: settings.max_source_chars]
@@ -134,8 +139,21 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         source.witness_group_id = source.witness_group_id or source.source_id
         job.parser_name = parse_result["parser_name"]
         job.parser_version = parse_result["parser_version"]
+        job.parser_strategy = parse_result.get("parser_strategy") or parser_strategy
         if not artifact_exists(db, source_id=source.source_id, artifact_type="raw_text"):
             store_text_artifact(db, source_id=source.source_id, artifact_type="raw_text", text=raw_text, actor=actor)
+
+        quality_config = None
+        min_passage_length = 180
+        max_passages_override: int | None = None
+        ai_allowed = settings.use_mock_ai or settings.ai_enabled
+        if tuning_run is not None:
+            quality_config = build_quality_config(tuning_run.profile_snapshot_json)
+            segmentation = get_segmentation_settings(tuning_run.profile_snapshot_json)
+            min_passage_length = segmentation["min_passage_length"]
+            max_passages_override = segmentation["max_passages_per_source_override"]
+            # Tuning apply runs are opt-in for translation/proposals, even when mocking.
+            ai_allowed = bool(tuning_run.ai_enabled)
 
         passages = build_passage_evidence(
             db,
@@ -143,11 +161,35 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
             source_id=source.source_id,
             content=raw_text,
             actor=actor,
-            max_passages=settings.max_passages_per_source,
+            max_passages=max_passages_override or settings.max_passages_per_source,
+            min_passage_length=min_passage_length,
+            quality_config=quality_config or build_quality_config({}),
+            produced_by_run_id=tuning_run.run_id if tuning_run else None,
+            ai_enabled=ai_allowed,
             translation_idempotency_root=f"{job.job_id}:{job.attempt_count}:translation",
         )
         source.digitization_status = "complete"
         source.updated_by = actor
+
+        if tuning_run is not None:
+            superseded_stmt = (
+                select(PassageEvidence)
+                .where(PassageEvidence.source_id == source.source_id, PassageEvidence.superseded_by_run_id.is_(None))
+                .order_by(PassageEvidence.created_at.asc())
+            )
+            existing = list(db.scalars(superseded_stmt))
+            new_ids = {passage.passage_id for passage in passages}
+            superseded_count = 0
+            for record in existing:
+                if record.passage_id in new_ids:
+                    continue
+                record.superseded_by_run_id = tuning_run.run_id
+                record.updated_by = actor
+                superseded_count += 1
+            tuning_run.summary_json = {
+                **(tuning_run.summary_json or {}),
+                "superseded_passages": superseded_count,
+            }
 
         created = {"tags": 0, "links": 0, "flags": 0}
         auto_reprocess_queued = 0
@@ -185,15 +227,16 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
                 skipped_filtered_passages += 1
                 continue
 
-            result = propose_for_passage(
-                db,
-                passage=passage,
-                actor=actor,
-                idempotency_root=f"{job.job_id}:{job.attempt_count}",
-            )
-            created["tags"] += result.tags_created
-            created["links"] += result.links_created
-            created["flags"] += result.flags_created
+            if ai_allowed:
+                result = propose_for_passage(
+                    db,
+                    passage=passage,
+                    actor=actor,
+                    idempotency_root=f"{job.job_id}:{job.attempt_count}",
+                )
+                created["tags"] += result.tags_created
+                created["links"] += result.links_created
+                created["flags"] += result.flags_created
 
         previous = job.status.value
         job.status = JobStatus.completed
@@ -202,6 +245,19 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         job.error_context_json = {}
         job.updated_by = actor
         _record_attempt(db, job=job, status=JobStatus.completed, actor=actor)
+
+        if tuning_run is not None:
+            tuning_run.status = "completed"
+            tuning_run.updated_by = actor
+            tuning_run.summary_json = {
+                **(tuning_run.summary_json or {}),
+                "passages_created": len(passages),
+                "tags_created": created["tags"],
+                "links_created": created["links"],
+                "flags_created": created["flags"],
+                "skipped_filtered_passages": skipped_filtered_passages,
+                "ai_enabled": tuning_run.ai_enabled,
+            }
 
         emit_audit_event(
             db,

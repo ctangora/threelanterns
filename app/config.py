@@ -14,12 +14,13 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(alias="DATABASE_URL")
-    openai_api_key: str = Field(alias="OPENAI_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     operator_id: str = Field(alias="OPERATOR_ID")
 
     openai_model: str = Field(default="gpt-5", alias="OPENAI_MODEL")
     openai_prompt_version: str = Field(default="v1", alias="OPENAI_PROMPT_VERSION")
     use_mock_ai: bool = Field(default=False, alias="USE_MOCK_AI")
+    ai_enabled: bool = Field(default=False, alias="AI_ENABLED")
 
     artifact_root: Path = Field(default=Path("./data/artifacts"), alias="ARTIFACT_ROOT")
     ingest_root: Path = Field(default=Path("./__Reference__"), alias="INGEST_ROOT")
@@ -34,10 +35,10 @@ class Settings(BaseSettings):
     def validate_required_runtime(self) -> "Settings":
         if not self.database_url.strip():
             raise ValueError("DATABASE_URL is required")
-        if not self.openai_api_key.strip():
-            raise ValueError("OPENAI_API_KEY is required")
         if not self.operator_id.strip():
             raise ValueError("OPERATOR_ID is required")
+        if (not self.use_mock_ai) and self.ai_enabled and (not self.openai_api_key.strip()):
+            raise ValueError("OPENAI_API_KEY is required when AI is enabled")
         if self.max_job_attempts < 1:
             raise ValueError("MAX_JOB_ATTEMPTS must be >= 1")
         if self.worker_poll_seconds < 1:

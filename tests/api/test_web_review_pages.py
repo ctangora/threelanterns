@@ -58,3 +58,16 @@ def test_reprocess_jobs_page_has_refresh_and_reason_filters(client, db_session, 
     assert "Refresh Now" in text
     assert "Auto refresh" in text
     assert "Reason code" in text
+
+
+def test_review_passages_supports_range_filters_and_preserves_next_link(client, db_session, tmp_path):
+    _seed_review_data(client, db_session, tmp_path)
+
+    response = client.get("/review/passages?page_size=5&min_usability=0.8&max_usability=1.0")
+    assert response.status_code == 200
+    text = response.text
+    assert "Usability score (max)" in text
+    assert 'name="min_usability"' in text
+    assert 'name="max_usability"' in text
+    assert "min_usability=0.8" in text
+    assert "max_usability=1.0" in text

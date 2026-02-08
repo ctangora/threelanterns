@@ -187,6 +187,67 @@ def test_r31_review_queue_filters_quality_and_export_columns(client, db_session,
     assert "trigger_reason_code_last" in export.text
 
 
+def test_r32_review_queue_supports_range_filters(client, db_session, tmp_path):
+    passage_high = _seed_ingested_passage(
+        client,
+        db_session,
+        tmp_path,
+        name="r32-range-high.txt",
+        content=(
+            "At dawn the practitioner offered water and incense, recited the invocation, "
+            "and marked a protective circle before the altar. "
+            * 10
+        ).strip(),
+    )
+    passage_low = _seed_ingested_passage(
+        client,
+        db_session,
+        tmp_path,
+        name="r32-range-low.txt",
+        content=("@@@ #### ??? ### |||| ---- invocation offering ritual altar " * 35).strip(),
+    )
+
+    response = client.get(
+        "/api/v1/review/queue",
+        params={
+            "object_type": "passage",
+            "include_filtered": "true",
+            "min_usability": 0.75,
+            "max_usability": 0.98,
+            "min_relevance": 0.40,
+            "max_relevance": 1.0,
+            "min_untranslated_ratio": 0.0,
+            "max_untranslated_ratio": 1.0,
+            "min_confidence": 0.0,
+            "max_confidence": 1.0,
+        },
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert any(item["object_id"] == passage_high.passage_id for item in items)
+    assert all(item["object_id"] != passage_low.passage_id for item in items)
+
+
+def test_r32_review_queue_rejects_invalid_ranges(client, db_session, tmp_path):
+    _seed_ingested_passage(
+        client,
+        db_session,
+        tmp_path,
+        name="r32-range-invalid.txt",
+        content=("invocation offering ritual passage " * 20).strip(),
+    )
+    response = client.get(
+        "/api/v1/review/queue",
+        params={
+            "object_type": "passage",
+            "min_usability": 0.9,
+            "max_usability": 0.1,
+        },
+    )
+    assert response.status_code == 400
+    assert "min_usability" in response.json()["detail"]
+
+
 def test_r32_reprocess_endpoint_accepts_legacy_reason_field(client, db_session, tmp_path):
     content = ("invocation offering ritual phrase " * 12).strip()
     passage = _seed_ingested_passage(client, db_session, tmp_path, name="r32-legacy-reason.txt", content=content)

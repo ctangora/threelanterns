@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.routes import audit, exports, health, intake, jobs, passages, records, reprocess, review, search
+from app.api.routes import audit, exports, health, intake, jobs, passages, records, reprocess, review, search, tuning
 from app.config import get_settings
 from app.database import SessionLocal, engine
 from app.services.schema import ensure_runtime_schema
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(reprocess.router)
     app.include_router(review.router)
     app.include_router(search.router)
+    app.include_router(tuning.router)
     app.include_router(exports.router)
     app.include_router(records.router)
     app.include_router(audit.router)

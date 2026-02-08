@@ -113,6 +113,27 @@ _ONTOLOGY_LEXICON = _build_ontology_lexicon()
 _POSITIVE_LEXICON = _ONTOLOGY_LEXICON.union(_RITUAL_KEYWORDS)
 
 
+@dataclass(frozen=True)
+class QualityConfig:
+    relevance_accept_threshold: float = PASSAGE_RELEVANCE_ACCEPT_THRESHOLD
+    relevance_filter_threshold: float = PASSAGE_RELEVANCE_FILTER_THRESHOLD
+    quality_version: str = PASSAGE_QUALITY_VERSION
+    positive_keywords: set[str] = None  # type: ignore[assignment]
+    noise_keywords: set[str] = None  # type: ignore[assignment]
+    noise_phrases: set[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:  # pragma: no cover
+        if self.positive_keywords is None:
+            object.__setattr__(self, "positive_keywords", set(_POSITIVE_LEXICON))
+        if self.noise_keywords is None:
+            object.__setattr__(self, "noise_keywords", set(_NEGATIVE_NOISE_KEYWORDS))
+        if self.noise_phrases is None:
+            object.__setattr__(self, "noise_phrases", set(_NEGATIVE_NOISE_PHRASES))
+
+
+DEFAULT_QUALITY_CONFIG = QualityConfig()
+
+
 @dataclass
 class PassageQualityAssessment:
     usability_score: float
@@ -210,19 +231,19 @@ def score_usability(text: str) -> tuple[float, dict]:
     }
 
 
-def score_relevance(text: str) -> tuple[float, dict]:
+def score_relevance(text: str, *, config: QualityConfig = DEFAULT_QUALITY_CONFIG) -> tuple[float, dict]:
     lowered = text.lower()
     tokens = _tokenize(lowered)
     total_tokens = max(len(tokens), 1)
 
-    positive_hits = sum(1 for token in tokens if token in _POSITIVE_LEXICON)
+    positive_hits = sum(1 for token in tokens if token in config.positive_keywords)
     ontology_hits = sum(1 for token in tokens if token in _ONTOLOGY_LEXICON)
-    negative_hits = sum(1 for token in tokens if token in _NEGATIVE_NOISE_KEYWORDS)
+    negative_hits = sum(1 for token in tokens if token in config.noise_keywords)
     positive_density = positive_hits / total_tokens
     ontology_density = ontology_hits / total_tokens
     negative_density = negative_hits / total_tokens
 
-    phrase_hits = sum(1 for phrase in _NEGATIVE_NOISE_PHRASES if phrase in lowered)
+    phrase_hits = sum(1 for phrase in config.noise_phrases if phrase in lowered)
     negative_phrase_penalty = min(phrase_hits * 0.12, 0.36)
 
     category_hits = {
@@ -259,18 +280,18 @@ def score_relevance(text: str) -> tuple[float, dict]:
     }
 
 
-def classify_relevance_state(relevance_score: float) -> RelevanceState:
-    if relevance_score < PASSAGE_RELEVANCE_FILTER_THRESHOLD:
+def classify_relevance_state(relevance_score: float, *, config: QualityConfig = DEFAULT_QUALITY_CONFIG) -> RelevanceState:
+    if relevance_score < config.relevance_filter_threshold:
         return RelevanceState.filtered
-    if relevance_score < PASSAGE_RELEVANCE_ACCEPT_THRESHOLD:
+    if relevance_score < config.relevance_accept_threshold:
         return RelevanceState.borderline
     return RelevanceState.accepted
 
 
-def evaluate_passage_quality(text: str) -> PassageQualityAssessment:
+def evaluate_passage_quality(text: str, *, config: QualityConfig = DEFAULT_QUALITY_CONFIG) -> PassageQualityAssessment:
     usability_score, usability_notes = score_usability(text)
-    relevance_score, relevance_notes = score_relevance(text)
-    relevance_state = classify_relevance_state(relevance_score)
+    relevance_score, relevance_notes = score_relevance(text, config=config)
+    relevance_state = classify_relevance_state(relevance_score, config=config)
     return PassageQualityAssessment(
         usability_score=usability_score,
         relevance_score=relevance_score,
@@ -279,5 +300,5 @@ def evaluate_passage_quality(text: str) -> PassageQualityAssessment:
             "usability": usability_notes,
             "relevance": relevance_notes,
         },
-        quality_version=PASSAGE_QUALITY_VERSION,
+        quality_version=config.quality_version,
     )

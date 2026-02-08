@@ -131,6 +131,8 @@ class PassageEvidence(Base, TimestampedMixin, OperatorMixin):
     )
     quality_notes_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     quality_version: Mapped[str] = mapped_column(String(40), default="r32_v1", nullable=False)
+    produced_by_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    superseded_by_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     text: Mapped["TextRecord"] = relationship(back_populates="passages")
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="passages")
@@ -228,6 +230,8 @@ class IngestionJob(Base, TimestampedMixin, OperatorMixin):
     error_context_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     parser_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tuning_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    parser_strategy: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     source: Mapped["SourceMaterialRecord"] = relationship(back_populates="jobs")
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
@@ -353,3 +357,56 @@ class AuditEvent(Base):
     correlation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     metadata_blob: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class TuningProfile(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "tuning_profiles"
+    __table_args__ = (
+        Index("ix_tuning_profiles_default", "is_default"),
+        Index("ix_tuning_profiles_name", "name"),
+    )
+
+    profile_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("tpf"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    thresholds_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    lexicons_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    segmentation_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class TuningRun(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "tuning_runs"
+    __table_args__ = (
+        Index("ix_tuning_runs_source", "source_id"),
+        Index("ix_tuning_runs_profile", "profile_id"),
+        Index("ix_tuning_runs_created_at", "created_at"),
+        Index("ix_tuning_runs_status", "status"),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("trn"))
+    source_id: Mapped[str] = mapped_column(ForeignKey("source_material_records.source_id"), nullable=False)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("tuning_profiles.profile_id"), nullable=False)
+    profile_snapshot_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    parser_strategy: Mapped[str] = mapped_column(String(80), default="auto_by_extension", nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    external_refs_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    summary_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class TuningRunPassage(Base, TimestampedMixin, OperatorMixin):
+    __tablename__ = "tuning_run_passages"
+    __table_args__ = (
+        Index("ix_tuning_run_passages_run", "run_id"),
+        Index("ix_tuning_run_passages_ordinal", "run_id", "ordinal"),
+    )
+
+    run_passage_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: prefixed_id("trp"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("tuning_runs.run_id"), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    excerpt_original: Mapped[str] = mapped_column(Text, nullable=False)
+    usability_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    relevance_state: Mapped[str] = mapped_column(String(30), default="accepted", nullable=False)
+    quality_notes_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)

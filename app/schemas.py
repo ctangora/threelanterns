@@ -223,3 +223,90 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
     total: int
     hits: list[SearchHit]
+
+
+class TuningProfileRequest(BaseModel):
+    name: str
+    thresholds_json: dict[str, Any] = Field(default_factory=dict)
+    lexicons_json: dict[str, Any] = Field(default_factory=dict)
+    segmentation_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class TuningProfileResponse(BaseModel):
+    profile_id: str
+    name: str
+    is_default: bool
+    thresholds_json: dict[str, Any]
+    lexicons_json: dict[str, Any]
+    segmentation_json: dict[str, Any]
+
+    @classmethod
+    def from_orm(cls, profile) -> "TuningProfileResponse":  # type: ignore[override]
+        return cls(
+            profile_id=profile.profile_id,
+            name=profile.name,
+            is_default=bool(profile.is_default),
+            thresholds_json=profile.thresholds_json or {},
+            lexicons_json=profile.lexicons_json or {},
+            segmentation_json=profile.segmentation_json or {},
+        )
+
+
+class TuningProfilesResponse(BaseModel):
+    default_profile_id: str
+    items: list[TuningProfileResponse]
+
+
+class TuningPreviewRequest(BaseModel):
+    source_id: str
+    profile_id: str | None = None
+    parser_strategy: str = "auto_by_extension"
+
+
+class TuningRunResponse(BaseModel):
+    run_id: str
+    source_id: str
+    profile_id: str
+    parser_strategy: str
+    mode: str
+    ai_enabled: bool
+    external_refs_enabled: bool
+    status: str
+    summary_json: dict[str, Any]
+
+    @classmethod
+    def from_orm(cls, run) -> "TuningRunResponse":  # type: ignore[override]
+        return cls(
+            run_id=run.run_id,
+            source_id=run.source_id,
+            profile_id=run.profile_id,
+            parser_strategy=run.parser_strategy,
+            mode=run.mode,
+            ai_enabled=bool(run.ai_enabled),
+            external_refs_enabled=bool(run.external_refs_enabled),
+            status=run.status,
+            summary_json=run.summary_json or {},
+        )
+
+
+class TuningPreviewResponse(BaseModel):
+    run: TuningRunResponse
+    summary: dict[str, Any]
+
+
+class TuningApplyRequest(BaseModel):
+    source_id: str
+    profile_id: str | None = None
+    parser_strategy: str = "auto_by_extension"
+    ai_enabled: bool = False
+    external_refs_enabled: bool = False
+
+
+class TuningApplyResponse(BaseModel):
+    run_id: str
+    job_id: str
+    status: str
+
+
+class TuningRunsResponse(BaseModel):
+    items: list[TuningRunResponse]

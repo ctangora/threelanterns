@@ -10,3 +10,9 @@ def parse_txt(path: Path) -> str:
             continue
     return data.decode("utf-8", errors="replace")
 
+
+def parse_txt_garble(path: Path) -> str:
+    data = parse_txt(path)
+    cleaned = "".join(char if char.isprintable() or char in {"\n", "\t"} else " " for char in data)
+    cleaned = cleaned.replace("\ufffd", " ").replace("�", " ")
+    return cleaned

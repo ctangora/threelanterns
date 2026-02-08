@@ -20,6 +20,16 @@ from app.services.search import search_records
 from app.services.validation import ValidationError
 from app.services.workflows.ingestion import create_ingestion_job
 from app.services.workflows.reprocess import enqueue_reprocess_job, list_reprocess_jobs
+from app.services.workflows.tuning import (
+    create_tuning_apply_run,
+    create_tuning_preview_run,
+    get_default_profile,
+    get_profile,
+    list_profiles,
+    list_tuning_runs,
+    promote_profile_as_default,
+    upsert_profile,
+)
 
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(tags=["web"])
@@ -87,11 +97,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
     state = request.query_params.get("state", "proposed")
     source_id = request.query_params.get("source_id")
     min_confidence = _read_float_query(request, "min_confidence")
+    max_confidence = _read_float_query(request, "max_confidence")
     needs_reprocess = _read_optional_bool_query(request, "needs_reprocess") if kind == "passage" else None
+    min_untranslated_ratio = _read_float_query(request, "min_untranslated_ratio") if kind == "passage" else None
     max_untranslated_ratio = _read_float_query(request, "max_untranslated_ratio") if kind == "passage" else None
     detected_language = request.query_params.get("detected_language") if kind == "passage" else None
     min_usability = _read_float_query(request, "min_usability") if kind == "passage" else None
+    max_usability = _read_float_query(request, "max_usability") if kind == "passage" else None
     min_relevance = _read_float_query(request, "min_relevance") if kind == "passage" else None
+    max_relevance = _read_float_query(request, "max_relevance") if kind == "passage" else None
     relevance_state = request.query_params.get("relevance_state") if kind == "passage" else None
     include_filtered = _read_optional_bool_query(request, "include_filtered") if kind == "passage" else None
     if include_filtered is None and kind == "passage":
@@ -109,11 +123,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             state=state,
             source_id=source_id,
             min_confidence=min_confidence,
+            max_confidence=max_confidence,
             needs_reprocess=needs_reprocess,
+            min_untranslated_ratio=min_untranslated_ratio,
             max_untranslated_ratio=max_untranslated_ratio,
             detected_language=detected_language,
             min_usability=min_usability,
+            max_usability=max_usability,
             min_relevance=min_relevance,
+            max_relevance=max_relevance,
             relevance_state=relevance_state,
             include_filtered=bool(include_filtered) if kind == "passage" else False,
             sort_by=sort_by,
@@ -128,11 +146,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": state,
             "source_id": source_id,
             "min_confidence": min_confidence,
+            "max_confidence": max_confidence,
             "needs_reprocess": needs_reprocess,
+            "min_untranslated_ratio": min_untranslated_ratio,
             "max_untranslated_ratio": max_untranslated_ratio,
             "detected_language": detected_language,
             "min_usability": min_usability,
+            "max_usability": max_usability,
             "min_relevance": min_relevance,
+            "max_relevance": max_relevance,
             "relevance_state": relevance_state,
             "include_filtered": include_filtered,
             "sort_by": sort_by,
@@ -154,11 +176,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "max_confidence": queue["max_confidence"],
             "needs_reprocess": queue["needs_reprocess"],
+            "min_untranslated_ratio": queue["min_untranslated_ratio"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
             "min_usability": queue["min_usability"],
+            "max_usability": queue["max_usability"],
             "min_relevance": queue["min_relevance"],
+            "max_relevance": queue["max_relevance"],
             "relevance_state": queue["relevance_state"],
             "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
@@ -172,11 +198,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "max_confidence": queue["max_confidence"],
             "needs_reprocess": queue["needs_reprocess"],
+            "min_untranslated_ratio": queue["min_untranslated_ratio"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
             "min_usability": queue["min_usability"],
+            "max_usability": queue["max_usability"],
             "min_relevance": queue["min_relevance"],
+            "max_relevance": queue["max_relevance"],
             "relevance_state": queue["relevance_state"],
             "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
@@ -203,11 +233,15 @@ def _render_review_page(request: Request, db: Session, *, kind: str, title: str)
             "state": queue["state"],
             "source_id": queue["source_id"],
             "min_confidence": queue["min_confidence"],
+            "max_confidence": queue["max_confidence"],
             "needs_reprocess": queue["needs_reprocess"],
+            "min_untranslated_ratio": queue["min_untranslated_ratio"],
             "max_untranslated_ratio": queue["max_untranslated_ratio"],
             "detected_language": queue["detected_language"],
             "min_usability": queue["min_usability"],
+            "max_usability": queue["max_usability"],
             "min_relevance": queue["min_relevance"],
+            "max_relevance": queue["max_relevance"],
             "relevance_state": queue["relevance_state"],
             "include_filtered": queue["include_filtered"],
             "sort_by": queue["sort_by"],
@@ -523,5 +557,285 @@ def search_page(request: Request, db: Session = Depends(get_db)):
             "culture_region": culture_region or "",
             "review_state": review_state or "",
             "limit": limit,
+        },
+    )
+
+
+@router.get("/tuning")
+def tuning_home(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    from sqlalchemy import func, or_
+    from app.models.core import PassageEvidence, SourceMaterialRecord, TextRecord
+
+    q = (request.query_params.get("q") or "").strip()
+    default_profile = get_default_profile(db, actor=settings.operator_id)
+    profiles = list_profiles(db)
+
+    sources_stmt = select(SourceMaterialRecord).order_by(SourceMaterialRecord.created_at.desc()).limit(30)
+    if q:
+        sources_stmt = (
+            select(SourceMaterialRecord)
+            .join(TextRecord, TextRecord.text_id == SourceMaterialRecord.text_id)
+            .where(
+                or_(
+                    SourceMaterialRecord.source_id == q,
+                    SourceMaterialRecord.text_id == q,
+                    SourceMaterialRecord.source_path.ilike(f"%{q}%"),
+                    TextRecord.canonical_title.ilike(f"%{q}%"),
+                )
+            )
+            .order_by(SourceMaterialRecord.created_at.desc())
+            .limit(50)
+        )
+    sources = list(db.scalars(sources_stmt))
+
+    most_recent = sources[:10]
+    garbled_rows = db.execute(
+        select(SourceMaterialRecord.source_id, func.avg(PassageEvidence.usability_score).label("avg_usability"))
+        .join(PassageEvidence, PassageEvidence.source_id == SourceMaterialRecord.source_id)
+        .group_by(SourceMaterialRecord.source_id)
+        .order_by(func.avg(PassageEvidence.usability_score).asc())
+        .limit(10)
+    ).all()
+    irrelevant_rows = db.execute(
+        select(SourceMaterialRecord.source_id, func.avg(PassageEvidence.relevance_score).label("avg_relevance"))
+        .join(PassageEvidence, PassageEvidence.source_id == SourceMaterialRecord.source_id)
+        .group_by(SourceMaterialRecord.source_id)
+        .order_by(func.avg(PassageEvidence.relevance_score).asc())
+        .limit(10)
+    ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "tuning.html",
+        {
+            "q": q,
+            "default_profile_id": default_profile.profile_id,
+            "profiles": profiles,
+            "sources": sources,
+            "most_recent": most_recent,
+            "most_garbled": [{"source_id": source_id, "avg_usability": float(avg or 0.0)} for source_id, avg in garbled_rows],
+            "most_irrelevant": [{"source_id": source_id, "avg_relevance": float(avg or 0.0)} for source_id, avg in irrelevant_rows],
+        },
+    )
+
+
+@router.get("/tuning/source/{source_id}")
+def tuning_source_page(
+    request: Request,
+    source_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    from sqlalchemy import func
+    from app.models.core import IngestionJob, PassageEvidence, SourceMaterialRecord, TextRecord
+
+    source = db.get(SourceMaterialRecord, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source_not_found")
+    text = db.get(TextRecord, source.text_id)
+
+    profiles = list_profiles(db)
+    default_profile = get_default_profile(db, actor=settings.operator_id)
+    profile_id = (request.query_params.get("profile_id") or default_profile.profile_id).strip()
+    profile = get_profile(db, profile_id=profile_id)
+
+    passages_total = int(db.scalar(select(func.count()).select_from(PassageEvidence).where(PassageEvidence.source_id == source_id)) or 0)
+    accepted = int(
+        db.scalar(select(func.count()).select_from(PassageEvidence).where(PassageEvidence.source_id == source_id, PassageEvidence.relevance_state == "accepted"))
+        or 0
+    )
+    borderline = int(
+        db.scalar(
+            select(func.count()).select_from(PassageEvidence).where(PassageEvidence.source_id == source_id, PassageEvidence.relevance_state == "borderline")
+        )
+        or 0
+    )
+    filtered = int(
+        db.scalar(select(func.count()).select_from(PassageEvidence).where(PassageEvidence.source_id == source_id, PassageEvidence.relevance_state == "filtered"))
+        or 0
+    )
+    avg_usability = float(
+        db.scalar(select(func.avg(PassageEvidence.usability_score)).where(PassageEvidence.source_id == source_id)) or 0.0
+    )
+    avg_relevance = float(
+        db.scalar(select(func.avg(PassageEvidence.relevance_score)).where(PassageEvidence.source_id == source_id)) or 0.0
+    )
+    avg_ratio = float(
+        db.scalar(select(func.avg(PassageEvidence.untranslated_ratio)).where(PassageEvidence.source_id == source_id)) or 0.0
+    )
+
+    last_job = db.scalar(select(IngestionJob).where(IngestionJob.source_id == source_id).order_by(IngestionJob.created_at.desc()).limit(1))
+    runs = list_tuning_runs(db, source_id=source_id, limit=20)
+
+    return templates.TemplateResponse(
+        request,
+        "tuning_source.html",
+        {
+            "source": source,
+            "text": text,
+            "profiles": profiles,
+            "profile": profile,
+            "profile_id": profile.profile_id,
+            "default_profile_id": default_profile.profile_id,
+            "snapshot": {
+                "passages_total": passages_total,
+                "accepted": accepted,
+                "borderline": borderline,
+                "filtered": filtered,
+                "avg_usability": round(avg_usability, 4),
+                "avg_relevance": round(avg_relevance, 4),
+                "avg_untranslated_ratio": round(avg_ratio, 4),
+            },
+            "last_job": last_job,
+            "runs": runs,
+            "parser_strategies": [
+                ("auto_by_extension", "Auto (by extension)"),
+                ("txt:clean_v1", "TXT clean v1"),
+                ("txt:garble_v1", "TXT garble v1"),
+                ("pdf:ocr_v0", "PDF OCR v0 (not implemented)"),
+                ("images:ocr_v0", "Images OCR v0 (not implemented)"),
+                ("old_english:normalize_v0", "Old English normalize v0 (not implemented)"),
+            ],
+        },
+    )
+
+
+@router.post("/tuning/profile/{profile_id}/update")
+def tuning_profile_update(
+    request: Request,
+    profile_id: str,
+    name: str = Form(...),
+    relevance_accept_threshold: float = Form(0.5),
+    relevance_filter_threshold: float = Form(0.3),
+    usability_reprocess_threshold: float = Form(0.6),
+    min_passage_length: int = Form(180),
+    max_passages_per_source_override: str | None = Form(None),
+    positive_keywords: str = Form(""),
+    noise_keywords: str = Form(""),
+    noise_phrases: str = Form(""),
+    set_default: str | None = Form(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    thresholds_json = {
+        "relevance_accept_threshold": relevance_accept_threshold,
+        "relevance_filter_threshold": relevance_filter_threshold,
+        "usability_reprocess_threshold": usability_reprocess_threshold,
+    }
+    lexicons_json = {
+        "positive_keywords": [line.strip().lower() for line in positive_keywords.splitlines() if line.strip()],
+        "noise_keywords": [line.strip().lower() for line in noise_keywords.splitlines() if line.strip()],
+        "noise_phrases": [line.strip().lower() for line in noise_phrases.splitlines() if line.strip()],
+    }
+    override_value: int | None = None
+    if max_passages_per_source_override and max_passages_per_source_override.strip():
+        try:
+            override_value = int(max_passages_per_source_override.strip())
+        except ValueError:
+            override_value = None
+    segmentation_json = {
+        "min_passage_length": int(min_passage_length),
+        "max_passages_per_source_override": override_value,
+    }
+    try:
+        upsert_profile(
+            db,
+            profile_id=profile_id,
+            name=name,
+            thresholds_json=thresholds_json,
+            lexicons_json=lexicons_json,
+            segmentation_json=segmentation_json,
+            actor=settings.operator_id,
+        )
+        if set_default:
+            promote_profile_as_default(db, profile_id=profile_id, actor=settings.operator_id)
+        db.commit()
+    except ValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    referer = request.headers.get("referer") or "/tuning"
+    return RedirectResponse(url=referer, status_code=303)
+
+
+@router.post("/tuning/source/{source_id}/preview")
+def tuning_preview_submit(
+    request: Request,
+    source_id: str,
+    profile_id: str = Form(...),
+    parser_strategy: str = Form("auto_by_extension"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        result = create_tuning_preview_run(
+            db,
+            source_id=source_id,
+            profile_id=profile_id,
+            parser_strategy=parser_strategy,
+            actor=settings.operator_id,
+        )
+        db.commit()
+    except ValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url=f"/tuning/runs/{result.run.run_id}", status_code=303)
+
+
+@router.post("/tuning/source/{source_id}/apply")
+def tuning_apply_submit(
+    request: Request,
+    source_id: str,
+    profile_id: str = Form(...),
+    parser_strategy: str = Form("auto_by_extension"),
+    ai_enabled: str | None = Form(None),
+    external_refs_enabled: str | None = Form(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    run, job = create_tuning_apply_run(
+        db,
+        source_id=source_id,
+        profile_id=profile_id,
+        parser_strategy=parser_strategy,
+        ai_enabled=bool(ai_enabled),
+        external_refs_enabled=bool(external_refs_enabled),
+        actor=settings.operator_id,
+    )
+    db.commit()
+    return RedirectResponse(url=f"/jobs", status_code=303)
+
+
+@router.post("/tuning/profile/{profile_id}/promote")
+def tuning_promote_profile(profile_id: str, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    try:
+        promote_profile_as_default(db, profile_id=profile_id, actor=settings.operator_id)
+        db.commit()
+    except ValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url="/tuning", status_code=303)
+
+
+@router.get("/tuning/runs/{run_id}")
+def tuning_run_page(request: Request, run_id: str, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    from app.models.core import TuningRun, TuningRunPassage
+
+    run = db.get(TuningRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run_not_found")
+    items = list(db.scalars(select(TuningRunPassage).where(TuningRunPassage.run_id == run_id).order_by(TuningRunPassage.ordinal.asc()).limit(200)))
+
+    profiles = list_profiles(db)
+    default_profile = get_default_profile(db, actor=settings.operator_id)
+
+    return templates.TemplateResponse(
+        request,
+        "tuning_run.html",
+        {
+            "run": run,
+            "items": items,
+            "summary": run.summary_json or {},
+            "profiles": profiles,
+            "default_profile_id": default_profile.profile_id,
         },
     )

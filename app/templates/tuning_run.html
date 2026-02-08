@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Tuning Run</h2>
+
+<section class="card">
+  <p><strong>Run:</strong> <code>{{ run.run_id }}</code></p>
+  <p>Mode: {{ run.mode }} | Status: {{ run.status }} | Parser: {{ run.parser_strategy }}</p>
+  <p>AI enabled: {{ run.ai_enabled }} | External refs enabled: {{ run.external_refs_enabled }}</p>
+  <p><a href="/tuning/source/{{ run.source_id }}?profile_id={{ run.profile_id }}">Back to source tuning</a></p>
+  <p><a href="/review/passages?source_id={{ run.source_id }}">Open passage queue</a></p>
+</section>
+
+{% if summary.source_snapshot %}
+<section class="card">
+  <h3>Current vs Preview</h3>
+  <p><strong>Current:</strong> total={{ summary.source_snapshot.total }}, accepted={{ summary.source_snapshot.accepted }}, borderline={{ summary.source_snapshot.borderline }}, filtered={{ summary.source_snapshot.filtered }}</p>
+  <p><strong>Preview:</strong> accepted={{ summary.preview_counts.accepted }}, borderline={{ summary.preview_counts.borderline }}, filtered={{ summary.preview_counts.filtered }}</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3>Deltas</h3>
+  <p><strong>Newly accepted (top 20):</strong></p>
+  <ul>
+    {% for row in summary.newly_accepted or [] %}
+      <li>segment {{ row.ordinal }} (prev={{ row.prev }}): {{ row.excerpt }}</li>
+    {% endfor %}
+  </ul>
+  <p><strong>Newly filtered (top 20):</strong></p>
+  <ul>
+    {% for row in summary.newly_filtered or [] %}
+      <li>segment {{ row.ordinal }} (prev={{ row.prev }}): {{ row.excerpt }}</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Preview Passages (first 200)</h3>
+  <p>Showing {{ items|length }} item(s).</p>
+  {% for item in items %}
+    <section class="card">
+      <h4>Segment {{ item.ordinal }} | usability={{ item.usability_score }} | relevance={{ item.relevance_score }} | state={{ item.relevance_state }}</h4>
+      <pre>{{ item.excerpt_original }}</pre>
+    </section>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h3>Promote Profile</h3>
+  <form method="post" action="/tuning/profile/{{ run.profile_id }}/promote">
+    <button type="submit">Promote this profile as default</button>
+  </form>
+</section>
+
+{% endblock %}
+

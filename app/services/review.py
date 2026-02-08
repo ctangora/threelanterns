@@ -61,11 +61,15 @@ def review_queue(
     state: str = ReviewerState.proposed.value,
     source_id: str | None = None,
     min_confidence: float | None = None,
+    max_confidence: float | None = None,
     needs_reprocess: bool | None = None,
+    min_untranslated_ratio: float | None = None,
     max_untranslated_ratio: float | None = None,
     detected_language: str | None = None,
     min_usability: float | None = None,
+    max_usability: float | None = None,
     min_relevance: float | None = None,
+    max_relevance: float | None = None,
     relevance_state: str | None = None,
     include_filtered: bool = False,
     sort_by: str = "created_at",
@@ -88,26 +92,51 @@ def review_queue(
             raise ValidationError(f"min_confidence is not supported for object_type={object_type}")
         if not (0.0 <= min_confidence <= 1.0):
             raise ValidationError("min_confidence must be within [0.0, 1.0]")
+    if max_confidence is not None:
+        if confidence_column is None:
+            raise ValidationError(f"max_confidence is not supported for object_type={object_type}")
+        if not (0.0 <= max_confidence <= 1.0):
+            raise ValidationError("max_confidence must be within [0.0, 1.0]")
+    if min_confidence is not None and max_confidence is not None and min_confidence > max_confidence:
+        raise ValidationError("min_confidence must be <= max_confidence")
     if source_id and source_column is None:
         raise ValidationError(f"source_id filter is not supported for object_type={object_type}")
     if needs_reprocess is not None and model is not PassageEvidence:
         raise ValidationError(f"needs_reprocess filter is not supported for object_type={object_type}")
+    if min_untranslated_ratio is not None and model is not PassageEvidence:
+        raise ValidationError(f"min_untranslated_ratio is not supported for object_type={object_type}")
     if max_untranslated_ratio is not None and model is not PassageEvidence:
         raise ValidationError(f"max_untranslated_ratio is not supported for object_type={object_type}")
     if detected_language and model is not PassageEvidence:
         raise ValidationError(f"detected_language filter is not supported for object_type={object_type}")
     if min_usability is not None and model is not PassageEvidence:
         raise ValidationError(f"min_usability is not supported for object_type={object_type}")
+    if max_usability is not None and model is not PassageEvidence:
+        raise ValidationError(f"max_usability is not supported for object_type={object_type}")
     if min_relevance is not None and model is not PassageEvidence:
         raise ValidationError(f"min_relevance is not supported for object_type={object_type}")
+    if max_relevance is not None and model is not PassageEvidence:
+        raise ValidationError(f"max_relevance is not supported for object_type={object_type}")
     if relevance_state is not None and model is not PassageEvidence:
         raise ValidationError(f"relevance_state is not supported for object_type={object_type}")
+    if min_untranslated_ratio is not None and not (0.0 <= min_untranslated_ratio <= 1.0):
+        raise ValidationError("min_untranslated_ratio must be within [0.0, 1.0]")
     if max_untranslated_ratio is not None and not (0.0 <= max_untranslated_ratio <= 1.0):
         raise ValidationError("max_untranslated_ratio must be within [0.0, 1.0]")
+    if min_untranslated_ratio is not None and max_untranslated_ratio is not None and min_untranslated_ratio > max_untranslated_ratio:
+        raise ValidationError("min_untranslated_ratio must be <= max_untranslated_ratio")
     if min_usability is not None and not (0.0 <= min_usability <= 1.0):
         raise ValidationError("min_usability must be within [0.0, 1.0]")
+    if max_usability is not None and not (0.0 <= max_usability <= 1.0):
+        raise ValidationError("max_usability must be within [0.0, 1.0]")
+    if min_usability is not None and max_usability is not None and min_usability > max_usability:
+        raise ValidationError("min_usability must be <= max_usability")
     if min_relevance is not None and not (0.0 <= min_relevance <= 1.0):
         raise ValidationError("min_relevance must be within [0.0, 1.0]")
+    if max_relevance is not None and not (0.0 <= max_relevance <= 1.0):
+        raise ValidationError("max_relevance must be within [0.0, 1.0]")
+    if min_relevance is not None and max_relevance is not None and min_relevance > max_relevance:
+        raise ValidationError("min_relevance must be <= max_relevance")
     parsed_relevance_state = None
     if relevance_state is not None:
         try:
@@ -127,8 +156,12 @@ def review_queue(
         where_clauses.append(source_column == source_id)
     if min_confidence is not None and confidence_column is not None:
         where_clauses.append(confidence_column >= min_confidence)
+    if max_confidence is not None and confidence_column is not None:
+        where_clauses.append(confidence_column <= max_confidence)
     if needs_reprocess is not None and model is PassageEvidence:
         where_clauses.append(model.needs_reprocess == needs_reprocess)
+    if min_untranslated_ratio is not None and model is PassageEvidence:
+        where_clauses.append(model.untranslated_ratio >= min_untranslated_ratio)
     if max_untranslated_ratio is not None and model is PassageEvidence:
         where_clauses.append(model.untranslated_ratio <= max_untranslated_ratio)
     if detected_language and model is PassageEvidence:
@@ -141,8 +174,12 @@ def review_queue(
         )
     if min_usability is not None and model is PassageEvidence:
         where_clauses.append(model.usability_score >= min_usability)
+    if max_usability is not None and model is PassageEvidence:
+        where_clauses.append(model.usability_score <= max_usability)
     if min_relevance is not None and model is PassageEvidence:
         where_clauses.append(model.relevance_score >= min_relevance)
+    if max_relevance is not None and model is PassageEvidence:
+        where_clauses.append(model.relevance_score <= max_relevance)
     if parsed_relevance_state is not None and model is PassageEvidence:
         where_clauses.append(model.relevance_state == parsed_relevance_state)
     if not include_filtered and model is PassageEvidence:
@@ -180,11 +217,15 @@ def review_queue(
         "state": requested_state.value,
         "source_id": source_id,
         "min_confidence": min_confidence,
+        "max_confidence": max_confidence,
         "needs_reprocess": needs_reprocess,
+        "min_untranslated_ratio": min_untranslated_ratio,
         "max_untranslated_ratio": max_untranslated_ratio,
         "detected_language": detected_language,
         "min_usability": min_usability,
+        "max_usability": max_usability,
         "min_relevance": min_relevance,
+        "max_relevance": max_relevance,
         "relevance_state": parsed_relevance_state.value if parsed_relevance_state else None,
         "include_filtered": include_filtered,
         "sort_by": sort_by,

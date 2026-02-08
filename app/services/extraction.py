@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 
-from app.constants import LANGUAGE_LABELS, LANGUAGE_NORMALIZED_CANONICAL, PASSAGE_QUALITY_VERSION
+from app.constants import LANGUAGE_LABELS, LANGUAGE_NORMALIZED_CANONICAL
 from app.enums import PublishState, ReviewerState, TranslationStatus
 from app.models.base import prefixed_id
 from app.models.core import PassageEvidence
-from app.services.quality import evaluate_passage_quality
+from app.services.quality import DEFAULT_QUALITY_CONFIG, QualityConfig, evaluate_passage_quality
 from app.services.translation import translate_passage_excerpt
 from app.services.utils import guess_language_code, normalize_to_english, split_into_passages
 from app.services.validation import validate_confidence, require
@@ -18,15 +18,19 @@ def build_passage_evidence(
     content: str,
     actor: str,
     max_passages: int,
+    min_passage_length: int = 180,
+    quality_config: QualityConfig = DEFAULT_QUALITY_CONFIG,
+    produced_by_run_id: str | None = None,
+    ai_enabled: bool = True,
     translation_idempotency_root: str,
 ) -> list[PassageEvidence]:
-    passages = split_into_passages(content)
+    passages = split_into_passages(content, minimum_length=min_passage_length)
     passages = passages[:max_passages]
     created: list[PassageEvidence] = []
 
     for index, passage in enumerate(passages, start=1):
         passage_id = prefixed_id("psg")
-        quality = evaluate_passage_quality(passage)
+        quality = evaluate_passage_quality(passage, config=quality_config)
         if quality.relevance_state.value == "filtered":
             detected_language_code = guess_language_code(passage)
             detected_language_label = LANGUAGE_LABELS.get(detected_language_code, "Undetermined")
@@ -37,7 +41,7 @@ def build_passage_evidence(
             translation_provider = "skipped_low_relevance"
             translation_trace_id = None
             language_detection_confidence = 0.52
-        else:
+        elif ai_enabled:
             translation = translate_passage_excerpt(
                 db,
                 passage_id=passage_id,
@@ -55,6 +59,16 @@ def build_passage_evidence(
             needs_reprocess = translation.needs_reprocess
             translation_provider = translation.translation_provider
             translation_trace_id = translation.trace_id
+        else:
+            detected_language_code = guess_language_code(passage)
+            detected_language_label = LANGUAGE_LABELS.get(detected_language_code, "Undetermined")
+            normalized_excerpt = normalize_to_english(passage)
+            translation_status = TranslationStatus.translated
+            untranslated_ratio = 0.0
+            needs_reprocess = False
+            translation_provider = "skipped_ai_disabled"
+            translation_trace_id = None
+            language_detection_confidence = 0.52
 
         confidence = 0.9 if detected_language_code == "eng" else 0.74
         validate_confidence(confidence, "extraction_confidence")
@@ -85,7 +99,8 @@ def build_passage_evidence(
             relevance_score=quality.relevance_score,
             relevance_state=quality.relevance_state,
             quality_notes_json=quality.notes,
-            quality_version=PASSAGE_QUALITY_VERSION,
+            quality_version=quality.quality_version,
+            produced_by_run_id=produced_by_run_id,
             created_by=actor,
             updated_by=actor,
         )

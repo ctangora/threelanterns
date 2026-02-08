@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Tuning Console</h2>
+
+<form method="get" action="/tuning" class="card">
+  <label>Search sources
+    <input type="text" name="q" value="{{ q }}" placeholder="source_id, text_id, title, filename..." />
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+<section class="card">
+  <h3>Profiles</h3>
+  <p>Default profile: <code>{{ default_profile_id }}</code></p>
+  <ul>
+    {% for p in profiles %}
+      <li>
+        <code>{{ p.profile_id }}</code> - {{ p.name }}
+        {% if p.is_default %}<strong>(default)</strong>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Quick Links</h3>
+  <p>Most recent:</p>
+  <ul>
+    {% for s in most_recent %}
+      <li><a href="/tuning/source/{{ s.source_id }}?profile_id={{ default_profile_id }}">{{ s.source_id }}</a></li>
+    {% endfor %}
+  </ul>
+  <p>Most garbled (lowest avg usability):</p>
+  <ul>
+    {% for row in most_garbled %}
+      <li><a href="/tuning/source/{{ row.source_id }}?profile_id={{ default_profile_id }}">{{ row.source_id }}</a> (avg={{ row.avg_usability }})</li>
+    {% endfor %}
+  </ul>
+  <p>Most irrelevant (lowest avg relevance):</p>
+  <ul>
+    {% for row in most_irrelevant %}
+      <li><a href="/tuning/source/{{ row.source_id }}?profile_id={{ default_profile_id }}">{{ row.source_id }}</a> (avg={{ row.avg_relevance }})</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Sources</h3>
+  <p>Showing {{ sources|length }} source(s).</p>
+  <ul>
+    {% for s in sources %}
+      <li>
+        <a href="/tuning/source/{{ s.source_id }}?profile_id={{ default_profile_id }}">{{ s.source_id }}</a>
+        <small>{{ s.source_path }}</small>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
+

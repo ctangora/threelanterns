@@ -47,6 +47,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _add_column_if_missing(engine, "ingestion_jobs", "error_context_json", "TEXT")
     _add_column_if_missing(engine, "ingestion_jobs", "parser_name", "VARCHAR(120)")
     _add_column_if_missing(engine, "ingestion_jobs", "parser_version", "VARCHAR(40)")
+    _add_column_if_missing(engine, "ingestion_jobs", "tuning_run_id", "VARCHAR(32)")
+    _add_column_if_missing(engine, "ingestion_jobs", "parser_strategy", "VARCHAR(80)")
     with engine.begin() as connection:
         connection.execute(text("UPDATE ingestion_jobs SET error_context_json = '{}' WHERE error_context_json IS NULL"))
 
@@ -71,6 +73,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _add_column_if_missing(engine, "passage_evidence", "relevance_state", "VARCHAR(30) DEFAULT 'accepted'")
     _add_column_if_missing(engine, "passage_evidence", "quality_notes_json", "TEXT DEFAULT '{}'")
     _add_column_if_missing(engine, "passage_evidence", "quality_version", "VARCHAR(40) DEFAULT 'r32_v1'")
+    _add_column_if_missing(engine, "passage_evidence", "produced_by_run_id", "VARCHAR(32)")
+    _add_column_if_missing(engine, "passage_evidence", "superseded_by_run_id", "VARCHAR(32)")
     with engine.begin() as connection:
         connection.execute(text("UPDATE passage_evidence SET translation_status = 'translated' WHERE translation_status IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET untranslated_ratio = 0 WHERE untranslated_ratio IS NULL"))
@@ -81,6 +85,67 @@ def ensure_runtime_schema(engine: Engine) -> None:
         connection.execute(text("UPDATE passage_evidence SET relevance_state = 'accepted' WHERE relevance_state IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET quality_notes_json = '{}' WHERE quality_notes_json IS NULL"))
         connection.execute(text("UPDATE passage_evidence SET quality_version = 'r32_v1' WHERE quality_version IS NULL"))
+
+    _create_table_if_missing(
+        engine,
+        "tuning_profiles",
+        """
+        CREATE TABLE tuning_profiles (
+          profile_id VARCHAR(32) PRIMARY KEY,
+          name VARCHAR(120) NOT NULL,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          thresholds_json TEXT NOT NULL DEFAULT '{}',
+          lexicons_json TEXT NOT NULL DEFAULT '{}',
+          segmentation_json TEXT NOT NULL DEFAULT '{}',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL
+        )
+        """,
+    )
+    _create_table_if_missing(
+        engine,
+        "tuning_runs",
+        """
+        CREATE TABLE tuning_runs (
+          run_id VARCHAR(32) PRIMARY KEY,
+          source_id VARCHAR(32) NOT NULL REFERENCES source_material_records(source_id),
+          profile_id VARCHAR(32) NOT NULL REFERENCES tuning_profiles(profile_id),
+          profile_snapshot_json TEXT NOT NULL DEFAULT '{}',
+          parser_strategy VARCHAR(80) NOT NULL DEFAULT 'auto_by_extension',
+          mode VARCHAR(20) NOT NULL,
+          ai_enabled INTEGER NOT NULL DEFAULT 0,
+          external_refs_enabled INTEGER NOT NULL DEFAULT 0,
+          status VARCHAR(20) NOT NULL DEFAULT 'pending',
+          summary_json TEXT NOT NULL DEFAULT '{}',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL
+        )
+        """,
+    )
+    _create_table_if_missing(
+        engine,
+        "tuning_run_passages",
+        """
+        CREATE TABLE tuning_run_passages (
+          run_passage_id VARCHAR(32) PRIMARY KEY,
+          run_id VARCHAR(32) NOT NULL REFERENCES tuning_runs(run_id),
+          ordinal INTEGER NOT NULL,
+          excerpt_original TEXT NOT NULL,
+          usability_score REAL NOT NULL DEFAULT 0,
+          relevance_score REAL NOT NULL DEFAULT 0,
+          relevance_state VARCHAR(30) NOT NULL DEFAULT 'accepted',
+          quality_notes_json TEXT NOT NULL DEFAULT '{}',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(120) NOT NULL,
+          updated_by VARCHAR(120) NOT NULL
+        )
+        """,
+    )
 
     _create_table_if_missing(
         engine,
@@ -155,9 +220,19 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _create_index_if_missing(engine, "ix_passage_usability_score", "passage_evidence", "usability_score")
     _create_index_if_missing(engine, "ix_passage_relevance_score", "passage_evidence", "relevance_score")
     _create_index_if_missing(engine, "ix_passage_relevance_state", "passage_evidence", "relevance_state")
+    _create_index_if_missing(engine, "ix_passage_produced_by_run", "passage_evidence", "produced_by_run_id")
+    _create_index_if_missing(engine, "ix_passage_superseded_by_run", "passage_evidence", "superseded_by_run_id")
     _create_index_if_missing(engine, "ix_passage_reprocess_status", "passage_reprocess_jobs", "status")
     _create_index_if_missing(engine, "ix_passage_reprocess_pdg", "passage_reprocess_jobs", "passage_id")
     _create_index_if_missing(engine, "ix_reprocess_reason_code", "passage_reprocess_jobs", "trigger_reason_code")
     _create_index_if_missing(engine, "ix_passage_reprocess_created_at", "passage_reprocess_jobs", "created_at")
     _create_index_if_missing(engine, "ix_translation_revision_passage", "passage_translation_revisions", "passage_id")
     _create_index_if_missing(engine, "ix_translation_revision_created_at", "passage_translation_revisions", "created_at")
+    _create_index_if_missing(engine, "ix_tuning_profiles_default", "tuning_profiles", "is_default")
+    _create_index_if_missing(engine, "ix_tuning_profiles_name", "tuning_profiles", "name")
+    _create_index_if_missing(engine, "ix_tuning_runs_source", "tuning_runs", "source_id")
+    _create_index_if_missing(engine, "ix_tuning_runs_profile", "tuning_runs", "profile_id")
+    _create_index_if_missing(engine, "ix_tuning_runs_created_at", "tuning_runs", "created_at")
+    _create_index_if_missing(engine, "ix_tuning_runs_status", "tuning_runs", "status")
+    _create_index_if_missing(engine, "ix_tuning_run_passages_run", "tuning_run_passages", "run_id")
+    _create_index_if_missing(engine, "ix_tuning_run_passages_ordinal", "tuning_run_passages", "run_id, ordinal")

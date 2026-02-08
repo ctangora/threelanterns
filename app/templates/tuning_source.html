@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Source Tuning</h2>
+
+<section class="card">
+  <p><strong>Source:</strong> <code>{{ source.source_id }}</code></p>
+  <p><strong>Path:</strong> <code>{{ source.source_path }}</code></p>
+  {% if text %}
+    <p><strong>Title:</strong> {{ text.canonical_title }}</p>
+    <p><strong>Text:</strong> <code>{{ text.text_id }}</code></p>
+  {% endif %}
+  <p><a href="/review/passages?source_id={{ source.source_id }}">Open current passage review queue</a></p>
+</section>
+
+<section class="card">
+  <h3>Current Snapshot</h3>
+  <p>Total passages: {{ snapshot.passages_total }}</p>
+  <p>Accepted: {{ snapshot.accepted }} | Borderline: {{ snapshot.borderline }} | Filtered: {{ snapshot.filtered }}</p>
+  <p>Avg usability: {{ snapshot.avg_usability }} | Avg relevance: {{ snapshot.avg_relevance }} | Avg untranslated ratio: {{ snapshot.avg_untranslated_ratio }}</p>
+  {% if last_job %}
+    <p>Last job: <code>{{ last_job.job_id }}</code> status={{ last_job.status }} parser={{ last_job.parser_name }}:{{ last_job.parser_version }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>Profile</h3>
+  <form method="get" action="/tuning/source/{{ source.source_id }}">
+    <label>Choose profile
+      <select name="profile_id">
+        {% for p in profiles %}
+          <option value="{{ p.profile_id }}" {% if p.profile_id == profile.profile_id %}selected{% endif %}>
+            {{ p.name }} ({{ p.profile_id }}){% if p.is_default %} [default]{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Load</button>
+  </form>
+
+  <form method="post" action="/tuning/profile/{{ profile.profile_id }}/update" class="card">
+    <label>Name
+      <input type="text" name="name" value="{{ profile.name }}" />
+    </label>
+    <fieldset>
+      <legend>Thresholds</legend>
+      <label>Relevance accept threshold
+        <input type="number" min="0" max="1" step="0.01" name="relevance_accept_threshold" value="{{ (profile.thresholds_json.relevance_accept_threshold if profile.thresholds_json is mapping else 0.5) }}" />
+      </label>
+      <label>Relevance filter threshold
+        <input type="number" min="0" max="1" step="0.01" name="relevance_filter_threshold" value="{{ (profile.thresholds_json.relevance_filter_threshold if profile.thresholds_json is mapping else 0.3) }}" />
+      </label>
+      <label>Usability reprocess threshold
+        <input type="number" min="0" max="1" step="0.01" name="usability_reprocess_threshold" value="{{ (profile.thresholds_json.usability_reprocess_threshold if profile.thresholds_json is mapping else 0.6) }}" />
+      </label>
+    </fieldset>
+    <fieldset>
+      <legend>Segmentation</legend>
+      <label>Min passage length
+        <input type="number" min="1" max="5000" step="1" name="min_passage_length" value="{{ (profile.segmentation_json.min_passage_length if profile.segmentation_json is mapping else 180) }}" />
+      </label>
+      <label>Max passages override (blank = default)
+        <input type="text" name="max_passages_per_source_override" value="{{ (profile.segmentation_json.max_passages_per_source_override if profile.segmentation_json is mapping else '') }}" />
+      </label>
+    </fieldset>
+    <fieldset>
+      <legend>Lexicons (one per line)</legend>
+      <label>Positive keywords
+        <textarea name="positive_keywords" rows="6">{% if profile.lexicons_json is mapping %}{{ (profile.lexicons_json.positive_keywords or [])|join('\\n') }}{% endif %}</textarea>
+      </label>
+      <label>Noise keywords
+        <textarea name="noise_keywords" rows="6">{% if profile.lexicons_json is mapping %}{{ (profile.lexicons_json.noise_keywords or [])|join('\\n') }}{% endif %}</textarea>
+      </label>
+      <label>Noise phrases
+        <textarea name="noise_phrases" rows="6">{% if profile.lexicons_json is mapping %}{{ (profile.lexicons_json.noise_phrases or [])|join('\\n') }}{% endif %}</textarea>
+      </label>
+    </fieldset>
+    <label><input type="checkbox" name="set_default" value="1" /> Set as default</label>
+    <button type="submit">Save Profile</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Resample Preview (No AI)</h3>
+  <form method="post" action="/tuning/source/{{ source.source_id }}/preview">
+    <input type="hidden" name="profile_id" value="{{ profile.profile_id }}" />
+    <label>Parser profile
+      <select name="parser_strategy">
+        {% for value, label in parser_strategies %}
+          <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Resample (Preview)</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Apply (Hybrid Re-Ingest)</h3>
+  <p><strong>AI is off by default.</strong> Enabling it may call OpenAI depending on your environment variables.</p>
+  <form method="post" action="/tuning/source/{{ source.source_id }}/apply">
+    <input type="hidden" name="profile_id" value="{{ profile.profile_id }}" />
+    <label>Parser profile
+      <select name="parser_strategy">
+        {% for value, label in parser_strategies %}
+          <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label><input type="checkbox" name="ai_enabled" value="1" /> Run translation/proposals</label>
+    <label><input type="checkbox" name="external_refs_enabled" value="1" /> Allow external free refs lookup</label>
+    <button type="submit">Apply to Source (Create job)</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Runs</h3>
+  <ul>
+    {% for r in runs %}
+      <li>
+        <a href="/tuning/runs/{{ r.run_id }}">{{ r.run_id }}</a>
+        ({{ r.mode }}, status={{ r.status }}, parser={{ r.parser_strategy }})
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}
+
