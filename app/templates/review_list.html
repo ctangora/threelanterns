@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ title }}</h2>
+<p>Items in queue: {{ items|length }}</p>
+{% for item in items %}
+<section class="card">
+  <h3><a href="/records/{{ item.object_id }}">{{ item.object_id }}</a></h3>
+  <pre>{{ item | tojson(indent=2) }}</pre>
+  <form method="post" action="/review/{{ kind }}/{{ item.object_id }}">
+    <label>Decision
+      <select name="decision">
+        <option value="approve">approve</option>
+        <option value="reject">reject</option>
+        <option value="needs_revision">needs_revision</option>
+      </select>
+    </label>
+    <label>Notes
+      <input name="notes" type="text" placeholder="Required for reject/needs_revision" />
+    </label>
+    <button type="submit">Submit Review</button>
+  </form>
+</section>
+{% endfor %}
+{% endblock %}

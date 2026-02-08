@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Source Intake</h2>
+<p>Ingest root: <code>{{ ingest_root }}</code></p>
+<p>Discovered files: {{ files|length }}</p>
+<table>
+  <thead>
+    <tr>
+      <th>Path</th>
+      <th>Extension</th>
+      <th>Size (bytes)</th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for file in files %}
+    <tr>
+      <td><code>{{ file.path }}</code></td>
+      <td>{{ file.extension }}</td>
+      <td>{{ file.size_bytes }}</td>
+      <td>
+        <form method="post" action="/intake/register">
+          <input type="hidden" name="source_path" value="{{ file.path }}" />
+          <input type="hidden" name="rights_status" value="public_domain" />
+          <input type="hidden" name="rights_evidence" value="Local research corpus" />
+          <input type="hidden" name="provenance_summary" value="Milestone 2 local source registration" />
+          <input type="hidden" name="holding_institution" value="Local Reference Library" />
+          <input type="hidden" name="accession_or_citation" value="internal-local" />
+          <input type="hidden" name="source_provenance_note" value="Imported from local __Reference__ corpus" />
+          <button type="submit">Register + Queue</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

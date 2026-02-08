@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Ingestion Jobs</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Job ID</th>
+      <th>Source ID</th>
+      <th>Status</th>
+      <th>Attempts</th>
+      <th>Error</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for job in jobs %}
+    <tr>
+      <td><a href="/records/{{ job.job_id }}">{{ job.job_id }}</a></td>
+      <td><a href="/records/{{ job.source_id }}">{{ job.source_id }}</a></td>
+      <td>{{ job.status.value }}</td>
+      <td>{{ job.attempt_count }}/{{ job.max_attempts }}</td>
+      <td><code>{{ (job.last_error or "")[:140] }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

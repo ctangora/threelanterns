@@ -13,3 +13,47 @@ Start with the milestone handoff docs in `docs/three-lanterns/`:
 - `docs/three-lanterns/05_workflows_pseudocode.md`
 - `docs/three-lanterns/06_validation_and_acceptance.md`
 - `docs/three-lanterns/appendix/sample_annotation_template.md`
+
+## Milestone 2 Implementation
+
+### Install
+
+```bash
+python3 -m pip install -e ".[dev]"
+```
+
+### Configure
+
+Copy `.env.example` to `.env` and set:
+
+- `DATABASE_URL`
+- `OPENAI_API_KEY`
+- `OPERATOR_ID`
+
+### Migrate
+
+```bash
+python3 scripts/migrate.py
+```
+
+### Run API + Worker
+
+```bash
+uvicorn app.main:app --reload
+python3 -m app.workers.run_worker
+```
+
+### Internal UI
+
+- `/intake`
+- `/jobs`
+- `/review/passages`
+- `/review/tags`
+- `/review/links`
+- `/review/flags`
+
+### Batch 25-source cycle
+
+```bash
+python3 scripts/run_m2_cycle.py
+```

@@ -1,0 +1,37 @@
+[project]
+name = "three-lanterns-m2"
+version = "0.1.0"
+description = "Three Lanterns Milestone 2 Internal Backend + Curation MVP"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.12.0",
+  "ebooklib>=0.18",
+  "fastapi>=0.116.0",
+  "jinja2>=3.1.0",
+  "openai>=1.60.0",
+  "psycopg[binary]>=3.2.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.7.0",
+  "python-multipart>=0.0.20",
+  "sqlalchemy>=2.0.36",
+  "uvicorn>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.3.0",
+  "pytest-cov>=6.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Audit Timeline</h2>
+<p>Type: <code>{{ object_type }}</code></p>
+<p>ID: <code>{{ object_id }}</code></p>
+<pre>{{ events_json }}</pre>
+{% endblock %}

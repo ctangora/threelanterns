@@ -3,3 +3,13 @@
 
 # Local reference library (contains very large binaries; keep out of git by default)
 __Reference__/
+
+# Python environment and build artifacts
+.venv/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Local runtime/testing data
+data/
+test_m2.db

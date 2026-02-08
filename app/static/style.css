@@ -1,0 +1,89 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f5ef;
+  --surface: #ffffff;
+  --ink: #1a1f1d;
+  --accent: #7f4f24;
+  --muted: #6c757d;
+  --line: #d9d3c6;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #fdfaf0, var(--bg));
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+h1 {
+  margin: 0 0 0.6rem;
+  font-size: 1.5rem;
+}
+
+nav {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+main {
+  padding: 1rem 1.5rem 2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+}
+
+th,
+td {
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  vertical-align: top;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f7f3e8;
+  border: 1px solid var(--line);
+  padding: 0.75rem;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+label {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+input,
+select {
+  width: 100%;
+  max-width: 500px;
+}

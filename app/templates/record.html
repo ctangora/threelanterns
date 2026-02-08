@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Record Detail</h2>
+<p>Type: <code>{{ object_type }}</code></p>
+<p>ID: <code>{{ object_id }}</code></p>
+<p><a href="/audit/{{ object_id }}">View Audit Events</a></p>
+<pre>{{ payload_json }}</pre>
+{% endblock %}
