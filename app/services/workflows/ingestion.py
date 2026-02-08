@@ -102,15 +102,25 @@ def process_job(db: Session, *, job: IngestionJob, actor: str, correlation_id: s
         raise ValidationError(f"Source missing for job {job.job_id}")
 
     try:
+        settings = get_settings()
         job.attempt_count += 1
         source_path = Path(source.source_path)
         require(source_path.exists(), f"Source file missing: {source_path}")
 
         raw_text = parse_source_file(source_path)
+        if len(raw_text) > settings.max_source_chars:
+            raw_text = raw_text[: settings.max_source_chars]
         if not artifact_exists(db, source_id=source.source_id, artifact_type="raw_text"):
             store_text_artifact(db, source_id=source.source_id, artifact_type="raw_text", text=raw_text, actor=actor)
 
-        passages = build_passage_evidence(db, text_id=source.text_id, source_id=source.source_id, content=raw_text, actor=actor)
+        passages = build_passage_evidence(
+            db,
+            text_id=source.text_id,
+            source_id=source.source_id,
+            content=raw_text,
+            actor=actor,
+            max_passages=settings.max_passages_per_source,
+        )
         source.digitization_status = "complete"
         source.updated_by = actor
 
@@ -181,4 +191,3 @@ def run_worker_cycle(db: Session, *, actor: str) -> IngestionJob | None:
         return None
     process_job(db, job=job, actor=actor, correlation_id=correlation_id)
     return job
-

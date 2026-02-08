@@ -13,13 +13,21 @@ router = APIRouter(prefix="/api/v1/review", tags=["review"])
 @router.get("/queue", response_model=ReviewQueueResponse)
 def get_queue(
     object_type: str = Query(..., pattern="^(passage|tag|link|flag)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> ReviewQueueResponse:
     try:
-        items = review_queue(db, object_type)
+        queue = review_queue(db, object_type, page=page, page_size=page_size, max_page_size=200)
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ReviewQueueResponse(object_type=object_type, items=items)
+    return ReviewQueueResponse(
+        object_type=object_type,
+        total=queue["total"],
+        page=queue["page"],
+        page_size=queue["page_size"],
+        items=queue["items"],
+    )
 
 
 @router.post("/{object_type}/{object_id}", response_model=ReviewResponse)
@@ -50,4 +58,3 @@ def review_object(
         decision=review.decision.value,
         new_state=review.new_state or "",
     )
-

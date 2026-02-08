@@ -43,6 +43,26 @@ uvicorn app.main:app --reload
 python3 -m app.workers.run_worker
 ```
 
+### macOS Click-To-Run
+
+In Finder, double-click:
+
+- `Start Three Lanterns UI.command`
+
+This launches API + worker in the background (using local SQLite + mock AI defaults if env vars are unset) and opens:
+
+- `http://127.0.0.1:8000/intake`
+
+To stop both processes, double-click:
+
+- `Stop Three Lanterns UI.command`
+
+Troubleshooting:
+
+1. If UI does not load, check `http://127.0.0.1:8000/health`.
+2. If startup fails, inspect `.run/api.log` and `.run/worker.log`.
+3. If you changed code, stop then restart via the two `.command` files.
+
 ### Internal UI
 
 - `/intake`

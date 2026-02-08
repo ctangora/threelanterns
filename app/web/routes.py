@@ -20,6 +20,48 @@ templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(tags=["web"])
 
 
+def _read_positive_int_query(request: Request, key: str, default: int) -> int:
+    raw = request.query_params.get(key)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
+def _render_review_page(request: Request, db: Session, *, kind: str, title: str):
+    page = _read_positive_int_query(request, "page", 1)
+    page_size = _read_positive_int_query(request, "page_size", 50)
+    queue = review_queue(db, kind, page=page, page_size=page_size, max_page_size=200)
+
+    rendered_items: list[dict] = []
+    for item in queue["items"]:
+        payload_pretty = json.dumps(item, indent=2, ensure_ascii=True)
+        rendered_items.append({**item, "payload_pretty": payload_pretty})
+
+    has_prev = queue["page"] > 1
+    has_next = queue["page"] * queue["page_size"] < queue["total"]
+    return templates.TemplateResponse(
+        request,
+        "review_list.html",
+        {
+            "title": title,
+            "kind": kind,
+            "items": rendered_items,
+            "total": queue["total"],
+            "page": queue["page"],
+            "page_size": queue["page_size"],
+            "has_prev": has_prev,
+            "has_next": has_next,
+            "prev_page": max(1, queue["page"] - 1),
+            "next_page": queue["page"] + 1,
+            "base_path": f"/review/{kind}s",
+        },
+    )
+
+
 @router.get("/")
 def home() -> RedirectResponse:
     return RedirectResponse(url="/intake", status_code=303)
@@ -86,26 +128,22 @@ def jobs_page(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/review/passages")
 def review_passages(request: Request, db: Session = Depends(get_db)):
-    items = review_queue(db, "passage")
-    return templates.TemplateResponse(request, "review_list.html", {"title": "Passage Review Queue", "kind": "passage", "items": items})
+    return _render_review_page(request, db, kind="passage", title="Passage Review Queue")
 
 
 @router.get("/review/tags")
 def review_tags(request: Request, db: Session = Depends(get_db)):
-    items = review_queue(db, "tag")
-    return templates.TemplateResponse(request, "review_list.html", {"title": "Tag Review Queue", "kind": "tag", "items": items})
+    return _render_review_page(request, db, kind="tag", title="Tag Review Queue")
 
 
 @router.get("/review/links")
 def review_links(request: Request, db: Session = Depends(get_db)):
-    items = review_queue(db, "link")
-    return templates.TemplateResponse(request, "review_list.html", {"title": "Commonality Link Review Queue", "kind": "link", "items": items})
+    return _render_review_page(request, db, kind="link", title="Commonality Link Review Queue")
 
 
 @router.get("/review/flags")
 def review_flags(request: Request, db: Session = Depends(get_db)):
-    items = review_queue(db, "flag")
-    return templates.TemplateResponse(request, "review_list.html", {"title": "Flag Review Queue", "kind": "flag", "items": items})
+    return _render_review_page(request, db, kind="flag", title="Flag Review Queue")
 
 
 @router.post("/review/{kind}/{object_id}")
@@ -156,4 +194,3 @@ def audit_page(request: Request, object_id: str, db: Session = Depends(get_db)):
         "audit.html",
         {"object_id": object_id, "object_type": object_type, "events_json": json.dumps(events, indent=2, default=str)},
     )
-

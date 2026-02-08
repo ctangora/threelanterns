@@ -135,3 +135,49 @@ def test_t10_source_fk_integrity_enforced(db_session):
         assert True
     else:
         raise AssertionError("Expected foreign key failure when source does not exist")
+
+
+def test_review_queue_defaults_and_metadata(client, db_session, tmp_path):
+    path = create_local_source_file(tmp_path, "queue-defaults.txt")
+    register = client.post("/api/v1/intake/register", json=_register_payload(path))
+    source_id = register.json()["source_id"]
+    client.post("/api/v1/jobs/ingest", json={"source_id": source_id})
+    run_worker_cycle(db_session, actor="test-operator")
+    db_session.commit()
+
+    response = client.get("/api/v1/review/queue", params={"object_type": "passage"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object_type"] == "passage"
+    assert body["page"] == 1
+    assert body["page_size"] == 50
+    assert body["total"] >= len(body["items"])
+
+
+def test_review_queue_pagination(client, db_session, tmp_path):
+    long_chunk = (
+        "This is a long ritual paragraph with invocation offering boundary marking and repetitive ceremonial language "
+        "that exceeds the minimum extraction threshold for segmentation and review workflow verification."
+    )
+    content = "\n\n".join([long_chunk for _ in range(30)])
+    path = create_local_source_file(tmp_path, "queue-pagination.txt", content=content)
+
+    register = client.post("/api/v1/intake/register", json=_register_payload(path))
+    source_id = register.json()["source_id"]
+    client.post("/api/v1/jobs/ingest", json={"source_id": source_id})
+    run_worker_cycle(db_session, actor="test-operator")
+    db_session.commit()
+
+    page_1 = client.get("/api/v1/review/queue", params={"object_type": "passage", "page": 1, "page_size": 5})
+    page_2 = client.get("/api/v1/review/queue", params={"object_type": "passage", "page": 2, "page_size": 5})
+
+    assert page_1.status_code == 200
+    assert page_2.status_code == 200
+    body_1 = page_1.json()
+    body_2 = page_2.json()
+    assert body_1["total"] >= 10
+    assert len(body_1["items"]) == 5
+    assert len(body_2["items"]) == 5
+    ids_1 = {item["object_id"] for item in body_1["items"]}
+    ids_2 = {item["object_id"] for item in body_2["items"]}
+    assert ids_1.isdisjoint(ids_2)

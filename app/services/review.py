@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import PublishState, ReviewDecisionEnum, ReviewerState, ReviewableObjectType
@@ -22,17 +23,54 @@ def get_review_model(object_type: str):
     raise ValidationError(f"Unsupported review object type: {object_type}")
 
 
-def review_queue(db: Session, object_type: str) -> list[dict[str, Any]]:
+def _to_json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {key: _to_json_safe(nested) for key, nested in value.items()}
+    if isinstance(value, list):
+        return [_to_json_safe(nested) for nested in value]
+    return value
+
+
+def review_queue(
+    db: Session,
+    object_type: str,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    max_page_size: int = 200,
+) -> dict[str, Any]:
     model, id_field, state_field = get_review_model(object_type)
     state_column = getattr(model, state_field)
-    stmt = select(model).where(state_column == ReviewerState.proposed).limit(200)
+    page = max(page, 1)
+    page_size = max(1, min(page_size, max_page_size))
+    offset = (page - 1) * page_size
+
+    total_stmt = select(func.count()).select_from(model).where(state_column == ReviewerState.proposed)
+    total = db.scalar(total_stmt) or 0
+
+    stmt = (
+        select(model)
+        .where(state_column == ReviewerState.proposed)
+        .order_by(model.created_at.asc())
+        .offset(offset)
+        .limit(page_size)
+    )
     rows = list(db.scalars(stmt))
     items: list[dict[str, Any]] = []
     for row in rows:
-        payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+        payload = {column.name: _to_json_safe(getattr(row, column.name)) for column in row.__table__.columns}
         payload["object_id"] = payload[id_field]
         items.append(payload)
-    return items
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def apply_review_decision(
@@ -96,4 +134,3 @@ def apply_review_decision(
         metadata_blob={"decision": decision.value, "notes": notes},
     )
     return review
-

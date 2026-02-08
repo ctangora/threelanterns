@@ -13,3 +13,4 @@ __pycache__/
 # Local runtime/testing data
 data/
 test_m2.db
+.run/

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     ingest_root: Path = Field(default=Path("./__Reference__"), alias="INGEST_ROOT")
     worker_poll_seconds: int = Field(default=2, alias="WORKER_POLL_SECONDS")
     max_job_attempts: int = Field(default=3, alias="MAX_JOB_ATTEMPTS")
+    max_source_chars: int = Field(default=250000, alias="MAX_SOURCE_CHARS")
+    max_passages_per_source: int = Field(default=25, alias="MAX_PASSAGES_PER_SOURCE")
 
     @model_validator(mode="after")
     def validate_required_runtime(self) -> "Settings":
@@ -38,6 +40,10 @@ class Settings(BaseSettings):
             raise ValueError("MAX_JOB_ATTEMPTS must be >= 1")
         if self.worker_poll_seconds < 1:
             raise ValueError("WORKER_POLL_SECONDS must be >= 1")
+        if self.max_source_chars < 2000:
+            raise ValueError("MAX_SOURCE_CHARS must be >= 2000")
+        if self.max_passages_per_source < 1:
+            raise ValueError("MAX_PASSAGES_PER_SOURCE must be >= 1")
         return self
 
 
@@ -46,4 +52,3 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.artifact_root.mkdir(parents=True, exist_ok=True)
     return settings
-

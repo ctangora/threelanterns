@@ -65,6 +65,9 @@ class JobResponse(BaseModel):
 
 class ReviewQueueResponse(BaseModel):
     object_type: str
+    total: int
+    page: int
+    page_size: int
     items: list[dict[str, Any]]
 
 
@@ -96,4 +99,3 @@ class AuditResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     timestamp: datetime
-

@@ -1,11 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>{{ title }}</h2>
-<p>Items in queue: {{ items|length }}</p>
+<p>Total in queue: {{ total }}</p>
+<p>Showing page {{ page }} (page size {{ page_size }}) with {{ items|length }} item(s).</p>
+<p>
+  {% if has_prev %}
+  <a href="{{ base_path }}?page={{ prev_page }}&page_size={{ page_size }}">Previous</a>
+  {% endif %}
+  {% if has_prev and has_next %} | {% endif %}
+  {% if has_next %}
+  <a href="{{ base_path }}?page={{ next_page }}&page_size={{ page_size }}">Next</a>
+  {% endif %}
+</p>
 {% for item in items %}
 <section class="card">
   <h3><a href="/records/{{ item.object_id }}">{{ item.object_id }}</a></h3>
-  <pre>{{ item | tojson(indent=2) }}</pre>
+  <pre>{{ item.payload_pretty }}</pre>
   <form method="post" action="/review/{{ kind }}/{{ item.object_id }}">
     <label>Decision
       <select name="decision">

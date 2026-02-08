@@ -14,8 +14,10 @@ def build_passage_evidence(
     source_id: str,
     content: str,
     actor: str,
+    max_passages: int,
 ) -> list[PassageEvidence]:
     passages = split_into_passages(content)
+    passages = passages[:max_passages]
     created: list[PassageEvidence] = []
 
     for index, passage in enumerate(passages, start=1):
@@ -44,4 +46,3 @@ def build_passage_evidence(
 
     db.flush()
     return created
-
